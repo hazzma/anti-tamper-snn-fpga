@@ -61,6 +61,11 @@ architecture rtl of mon_volt is
     signal eval_timer  : unsigned(15 downto 0) := (others => '0');
     signal new_sample  : boolean := false;
 
+    -- Pipelined window evaluation signals
+    signal eval_p1      : std_logic := '0';
+    signal diff_mult_p1 : unsigned(19 downto 0) := (others => '0');
+    signal soft_spk_p1  : std_logic := '0';
+
 begin
 
     vccint_raw_code <= vccint_code;
@@ -194,6 +199,7 @@ begin
 
                 -- 100 us Evaluation Window
                 eval_timer <= eval_timer + 1;
+                eval_p1    <= '0';
                 if eval_timer >= 10000 then
                     eval_timer <= (others => '0');
                     base_val   := shift_right(base_reg, 4); -- Extract integer code
@@ -201,17 +207,27 @@ begin
 
                     -- Soft Spike Generation if dip > V_SOFT_TH (default 12 codes ≈ 9 mV)
                     if diff_code >= to_integer(v_soft_th) then
-                        v_soft_spike <= '1';
-                        -- Q-mapping contract (§7.2): q = clamp(1 + floor(|delta_mV| / 4), 1, 15)
-                        -- 1 code ≈ 0.732 mV => 5 codes ≈ 3.66 mV ≈ 4 mV
-                        q_calc := 1 + (diff_code / 5);
-                        if q_calc > 15 then
-                            q_calc := 15;
-                        elsif q_calc < 1 then
-                            q_calc := 1;
-                        end if;
-                        v_soft_q <= to_unsigned(q_calc, 4);
+                        soft_spk_p1  <= '1';
+                        -- diff * 205 / 1024 is bit-exact equivalent of diff / 5
+                        diff_mult_p1 <= to_unsigned(diff_code * 205, 20);
+                    else
+                        soft_spk_p1  <= '0';
+                        diff_mult_p1 <= (others => '0');
                     end if;
+                    eval_p1 <= '1';
+                end if;
+
+                -- Pipeline Stage 2: Register soft spike & q calculation (delay < 1.5 ns)
+                if eval_p1 = '1' and soft_spk_p1 = '1' then
+                    v_soft_spike <= '1';
+                    -- Shift right by 10 bits gives floor(diff / 5)
+                    q_calc := 1 + to_integer(diff_mult_p1(19 downto 10));
+                    if q_calc > 15 then
+                        q_calc := 15;
+                    elsif q_calc < 1 then
+                        q_calc := 1;
+                    end if;
+                    v_soft_q <= to_unsigned(q_calc, 4);
                 end if;
 
             end if;

@@ -95,6 +95,7 @@ begin
         wait until rising_edge(clk100);
         spikes_active <= (others => '0');
         wait until rising_edge(clk100);
+        wait for 1 ns;
 
         assert fire_out(1) = '0' 
             report "FAIL: Single noise pulse should NOT fire N1!" severity failure;
@@ -116,6 +117,7 @@ begin
             spikes_q(CH_CLK_SOFT)      <= to_unsigned(3, 4);
             wait until rising_edge(clk100);
             spikes_active <= (others => '0');
+            wait until rising_edge(clk100);
 
             -- Wait a delta or check
             wait for 1 ns;
@@ -149,6 +151,7 @@ begin
         spikes_q(CH_CLK_FAST_H)      <= to_unsigned(15, 4);
         wait until rising_edge(clk100);
         spikes_active <= (others => '0');
+        wait until rising_edge(clk100);
         wait for 1 ns;
 
         assert fire_out(0) = '1'

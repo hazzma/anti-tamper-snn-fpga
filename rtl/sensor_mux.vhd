@@ -45,15 +45,22 @@ end entity sensor_mux;
 architecture rtl of sensor_mux is
 begin
 
-    p_mux : process(all)
+    p_mux : process(clk100)
     begin
-        -- Default inactive
-        spikes_active <= (others => '0');
-        for i in 0 to N_CH-1 loop
-            spikes_q_out(i) <= (others => '0');
-        end loop;
+        if rising_edge(clk100) then
+            if rstn = '0' then
+                spikes_active <= (others => '0');
+                for i in 0 to N_CH-1 loop
+                    spikes_q_out(i) <= (others => '0');
+                end loop;
+            else
+                -- Default inactive
+                spikes_active <= (others => '0');
+                for i in 0 to N_CH-1 loop
+                    spikes_q_out(i) <= (others => '0');
+                end loop;
 
-        case mode_sel is
+                case mode_sel is
             --------------------------------------------------------------------
             -- Mode A: Full Synthetic Injection
             --------------------------------------------------------------------
@@ -133,8 +140,9 @@ begin
 
                 spikes_active(CH_V_SOFT)        <= synth_spikes(CH_V_SOFT);
                 spikes_q_out(CH_V_SOFT)         <= synth_q(CH_V_SOFT);
-
         end case;
+            end if;
+        end if;
     end process p_mux;
 
 end architecture rtl;

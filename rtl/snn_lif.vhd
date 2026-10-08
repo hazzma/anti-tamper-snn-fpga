@@ -98,6 +98,11 @@ architecture rtl of snn_lif is
         return tot;
     end function calc_total_delta;
 
+    -- Pipeline registers between Adder Tree and Membrane Update
+    type delta_pipe_array_t is array(0 to N_NEUR-1) of signed(15 downto 0);
+    signal delta_pipe     : delta_pipe_array_t := (others => (others => '0'));
+    signal leak_pipe      : std_logic := '0';
+
 begin
 
     fire_out    <= fire_reg;
@@ -106,10 +111,27 @@ begin
     alert_snn   <= fire_reg(0) or fire_reg(1) or fire_reg(2);
 
     ----------------------------------------------------------------------------
-    -- Sequential Membrane State Update & Threshold Firing Process
+    -- Stage 1: Parallel Adder Tree Evaluation (Registered)
+    ----------------------------------------------------------------------------
+    p_pipe1 : process(clk100)
+    begin
+        if rising_edge(clk100) then
+            if rstn = '0' then
+                delta_pipe <= (others => (others => '0'));
+                leak_pipe  <= '0';
+            else
+                leak_pipe <= leak_tick;
+                for n in 0 to N_NEUR-1 loop
+                    delta_pipe(n) <= calc_total_delta(weights(n), spikes_active, spikes_q);
+                end loop;
+            end if;
+        end if;
+    end process p_pipe1;
+
+    ----------------------------------------------------------------------------
+    -- Stage 2: Sequential Membrane State Update & Threshold Firing Process
     ----------------------------------------------------------------------------
     p_neuron : process(clk100)
-        variable total_delta : signed(15 downto 0);
         variable v_accum     : signed(15 downto 0);
         variable leak_val    : signed(15 downto 0);
         variable n_fired     : std_logic_vector(N_NEUR-1 downto 0);
@@ -129,24 +151,21 @@ begin
                 n_fired := (others => '0');
 
                 for n in 0 to N_NEUR-1 loop
-                    -- Step 1: Deposit single balanced adder tree sum (depth 3)
-                    total_delta := calc_total_delta(weights(n), spikes_active, spikes_q);
-                    v_accum     := sat_add16(v_mem(n), total_delta);
-
-                    -- Step 2: Leak phase (executed on periodic leak tick, V -= V >> M)
-                    if leak_tick = '1' then
-                        leak_val := shift_right(v_accum, m_shifts(n));
-                        v_accum  := sat_add16(v_accum, -leak_val);
+                    if leak_pipe = '1' then
+                        -- Pure leak step
+                        leak_val := shift_right(v_mem(n), m_shifts(n));
+                        v_mem(n) <= sat_add16(v_mem(n), -leak_val);
+                    else
+                        -- Deposit & Threshold Evaluation
+                        v_accum := sat_add16(v_mem(n), delta_pipe(n));
+                        if v_accum >= thetas(n) then
+                            n_fired(n) := '1';
+                            -- Subtractive reset: V -= theta
+                            v_mem(n)   <= sat_add16(v_accum, -thetas(n));
+                        else
+                            v_mem(n)   <= v_accum;
+                        end if;
                     end if;
-
-                    -- Step 3: Threshold check and Subtractive Reset
-                    if v_accum >= thetas(n) then
-                        n_fired(n) := '1';
-                        -- Subtractive reset: V -= theta
-                        v_accum := sat_add16(v_accum, -thetas(n));
-                    end if;
-
-                    v_mem(n) <= v_accum;
                 end loop;
 
                 fire_reg <= n_fired;

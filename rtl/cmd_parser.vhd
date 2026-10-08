@@ -98,6 +98,7 @@ begin
     synth_q       <= synth_q_r;
     attack_active <= is_attacking;
     log_mode      <= log_reg;
+    key_data      <= x"0123456789ABCDEF0123456789ABCDEF";
 
     ----------------------------------------------------------------------------
     -- Command Reception and Parsing Process

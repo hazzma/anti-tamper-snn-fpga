@@ -130,8 +130,46 @@ architecture rtl of top is
     signal latency_cycles : unsigned(31 downto 0);
     signal heartbeat_led  : std_logic;
 
+    -- Button Edge Detection & Debouncing
+    signal btnc_d1, btnc_d2   : std_logic := '0';
+    signal btnu_d1, btnu_d2   : std_logic := '0';
+    signal btnd_d1, btnd_d2   : std_logic := '0';
+    signal btnc_pulse         : std_logic := '0';
+    signal btnu_pulse         : std_logic := '0';
+    signal btnd_pulse         : std_logic := '0';
+
+    -- Physical Hardware Attack Sequencer (triggered by BTNC, BTNU, or BTND + SW(15 downto 12))
+    type hw_seq_state_t is (SEQ_IDLE, SEQ_BURST_GLITCH, SEQ_SWEEP);
+    signal seq_state          : hw_seq_state_t := SEQ_IDLE;
+    signal seq_burst_cnt      : integer range 0 to 10 := 0;
+    signal seq_timer          : unsigned(23 downto 0) := (others => '0');
+    signal seq_glitch_req     : std_logic := '0';
+    signal seq_stress_en      : std_logic := '0';
+    signal seq_attacking      : std_logic := '0';
+    signal seq_div_req        : std_logic := '0';
+    signal seq_div_val        : unsigned(7 downto 0) := to_unsigned(40, 8);
+
+    -- Combined Control Signals (Physical Hardware + UART Parser)
+    signal total_glitch_req   : std_logic;
+    signal total_stress_en    : std_logic;
+    signal total_attack_act   : std_logic;
+    signal total_div_req      : std_logic;
+    signal total_div_val      : unsigned(7 downto 0);
+
+    -- Switch-gated Monitor Flags (SW(0) = Monitor Subsystem Enable)
+    signal g_clk_fast_h       : std_logic;
+    signal g_clk_slow_h       : std_logic;
+    signal g_clk_stop_h       : std_logic;
+    signal g_mmcm_unlock_h    : std_logic;
+    signal g_v_under_h        : std_logic;
+    signal g_v_over_h         : std_logic;
+    signal g_clk_soft_spk     : std_logic;
+    signal g_clk_soft_q       : unsigned(3 downto 0);
+    signal g_v_soft_spk       : std_logic;
+    signal g_v_soft_q         : unsigned(3 downto 0);
+
     -- Combined zeroize signal to victim core
-    signal total_zeroize  : std_logic;
+    signal total_zeroize      : std_logic;
 
 begin
 
@@ -159,9 +197,137 @@ begin
     -- Combined zeroize pulse (from response escalation OR manual UART wipe)
     total_zeroize <= zeroize_pulse or manual_wipe;
 
+    -- Switch-gated Monitor Flags (SW(0) = Monitor Subsystem Enable)
+    g_clk_fast_h    <= clk_fast_h and SW(0);
+    g_clk_slow_h    <= clk_slow_h and SW(0);
+    g_clk_stop_h    <= clk_stop_h and SW(0);
+    g_mmcm_unlock_h <= mmcm_unlock_h and SW(0);
+    g_v_under_h     <= v_under_h and SW(0);
+    g_v_over_h      <= v_over_h and SW(0);
+    g_clk_soft_spk  <= clk_soft_spk and SW(0);
+    g_clk_soft_q    <= clk_soft_q when SW(0) = '1' else (others => '0');
+    g_v_soft_spk    <= v_soft_spk and SW(0);
+    g_v_soft_q      <= v_soft_q when SW(0) = '1' else (others => '0');
+
     -- OR-reduction of all Layer 1 Hard Flags
-    hard_alert_or <= clk_gross_h or clk_fast_h or clk_slow_h or clk_stop_h or
-                     mmcm_unlock_h or v_under_h or v_over_h or key_corrupt_h;
+    hard_alert_or <= g_clk_fast_h or g_clk_slow_h or g_clk_stop_h or
+                     g_mmcm_unlock_h or g_v_under_h or g_v_over_h or key_corrupt_h;
+
+    -- Hardware Controls
+    total_glitch_req <= glitch_req or seq_glitch_req;
+    total_stress_en  <= stress_en or SW(2) or seq_stress_en;
+    total_attack_act <= attack_active or seq_attacking;
+    total_div_req    <= seq_div_req;
+    total_div_val    <= seq_div_val;
+
+    ----------------------------------------------------------------------------
+    -- Physical Button Debounce & Hardware Attack Sequencer
+    ----------------------------------------------------------------------------
+    p_hw_seq : process(clk100)
+    begin
+        if rising_edge(clk100) then
+            if rstn = '0' then
+                btnc_d1        <= '0';
+                btnc_d2        <= '0';
+                btnu_d1        <= '0';
+                btnu_d2        <= '0';
+                btnd_d1        <= '0';
+                btnd_d2        <= '0';
+                btnc_pulse     <= '0';
+                btnu_pulse     <= '0';
+                btnd_pulse     <= '0';
+                seq_state      <= SEQ_IDLE;
+                seq_burst_cnt  <= 0;
+                seq_timer      <= (others => '0');
+                seq_glitch_req <= '0';
+                seq_stress_en  <= '0';
+                seq_attacking  <= '0';
+                seq_div_req    <= '0';
+                seq_div_val    <= to_unsigned(40, 8);
+            else
+                btnc_d1    <= BTNC; btnc_d2 <= btnc_d1;
+                btnc_pulse <= btnc_d1 and not btnc_d2;
+
+                btnu_d1    <= BTNU; btnu_d2 <= btnu_d1;
+                btnu_pulse <= btnu_d1 and not btnu_d2;
+
+                btnd_d1    <= BTND; btnd_d2 <= btnd_d1;
+                btnd_pulse <= btnd_d1 and not btnd_d2;
+
+                seq_glitch_req <= '0';
+                seq_div_req    <= '0';
+
+                case seq_state is
+                    when SEQ_IDLE =>
+                        seq_timer <= (others => '0');
+                        if btnc_pulse = '1' then
+                            seq_glitch_req <= '1';
+                        elsif btnu_pulse = '1' then
+                            seq_state     <= SEQ_SWEEP;
+                            seq_attacking <= '1';
+                            seq_div_val   <= to_unsigned(40, 8);
+                        elsif btnd_pulse = '1' then
+                            case SW(15 downto 12) is
+                                when "0000" => -- SCEN0: Normal
+                                    null;
+                                when "0001" => -- SCEN1: Single Glitch
+                                    seq_burst_cnt  <= 1;
+                                    seq_state      <= SEQ_BURST_GLITCH;
+                                    seq_attacking  <= '1';
+                                    seq_glitch_req <= '1';
+                                when "0010" => -- SCEN2: Repeat-Probe (5 glitches)
+                                    seq_burst_cnt  <= 5;
+                                    seq_state      <= SEQ_BURST_GLITCH;
+                                    seq_attacking  <= '1';
+                                    seq_glitch_req <= '1';
+                                when "0011" => -- SCEN3: Combined Glitch + Stress
+                                    seq_burst_cnt  <= 5;
+                                    seq_stress_en  <= '1';
+                                    seq_state      <= SEQ_BURST_GLITCH;
+                                    seq_attacking  <= '1';
+                                    seq_glitch_req <= '1';
+                                when "0100" => -- SCEN4: Frequency Sweep
+                                    seq_state     <= SEQ_SWEEP;
+                                    seq_attacking <= '1';
+                                    seq_div_val   <= to_unsigned(40, 8);
+                                when others =>
+                                    null;
+                            end case;
+                        end if;
+
+                    when SEQ_BURST_GLITCH =>
+                        seq_timer <= seq_timer + 1;
+                        if seq_timer >= 100000 then -- 1 ms between glitch pulses
+                            seq_timer <= (others => '0');
+                            if seq_burst_cnt > 1 then
+                                seq_burst_cnt  <= seq_burst_cnt - 1;
+                                seq_glitch_req <= '1';
+                            else
+                                seq_burst_cnt <= 0;
+                                seq_stress_en <= '0';
+                                seq_attacking <= '0';
+                                seq_state     <= SEQ_IDLE;
+                            end if;
+                        end if;
+
+                    when SEQ_SWEEP =>
+                        seq_timer <= seq_timer + 1;
+                        if seq_timer >= 500000 then -- 5 ms per step
+                            seq_timer <= (others => '0');
+                            if seq_div_val > 24 then
+                                seq_div_val <= seq_div_val - 2;
+                                seq_div_req <= '1';
+                            else
+                                seq_div_val   <= to_unsigned(40, 8);
+                                seq_div_req   <= '1';
+                                seq_attacking <= '0';
+                                seq_state     <= SEQ_IDLE;
+                            end if;
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process p_hw_seq;
 
     ----------------------------------------------------------------------------
     -- U1: Clock Generator (MMCME2_ADV)
@@ -195,11 +361,11 @@ begin
             drp_do        => drp_do,
             drp_drdy      => drp_drdy,
             mmcm_locked   => mmcm_locked,
-            glitch_req    => glitch_req or BTNC, -- Button BTNC triggers manual glitch
+            glitch_req    => total_glitch_req,
             glitch_div    => glitch_div,
             glitch_dur_us => glitch_dur_us,
-            set_div_req   => '0',
-            set_div_val   => to_unsigned(40, 8),
+            set_div_req   => total_div_req,
+            set_div_val   => total_div_val,
             drp_busy      => drp_busy,
             glitch_active => glitch_act
         );
@@ -298,7 +464,7 @@ begin
         port map (
             clk100     => clk100,
             rstn       => rstn,
-            stress_en  => stress_en,
+            stress_en  => total_stress_en,
             active_out => open
         );
 
@@ -340,18 +506,18 @@ begin
             clk100            => clk100,
             rstn              => rstn,
             mode_sel          => sensor_mode_cfg,
-            real_clk_fast_h   => clk_fast_h,
-            real_clk_slow_h   => clk_slow_h,
-            real_clk_stop_h   => clk_stop_h,
-            real_mmcm_unlock  => mmcm_unlock_h,
-            real_v_under_h    => v_under_h,
-            real_v_over_h     => v_over_h,
+            real_clk_fast_h   => g_clk_fast_h,
+            real_clk_slow_h   => g_clk_slow_h,
+            real_clk_stop_h   => g_clk_stop_h,
+            real_mmcm_unlock  => g_mmcm_unlock_h,
+            real_v_under_h    => g_v_under_h,
+            real_v_over_h     => g_v_over_h,
             real_key_corr_h   => key_corrupt_h,
             real_jtag_h       => '0', -- mon_jtag stretch goal
-            real_clk_soft_spk => clk_soft_spk,
-            real_clk_soft_q   => clk_soft_q,
-            real_v_soft_spk   => v_soft_spk,
-            real_v_soft_q     => v_soft_q,
+            real_clk_soft_spk => g_clk_soft_spk,
+            real_clk_soft_q   => g_clk_soft_q,
+            real_v_soft_spk   => g_v_soft_spk,
+            real_v_soft_q     => g_v_soft_q,
             synth_spikes      => synth_spikes,
             synth_q           => synth_q,
             spikes_active     => spikes_active,
@@ -391,10 +557,10 @@ begin
             snn_alert_l3     => snn_alert,
             snn_class_in     => snn_class,
             arm_en           => arm_cfg and SW(0),
-            bypass_snn       => bypass_cfg or SW(1),
+            bypass_snn       => bypass_cfg or (not SW(1)),
             esc_th           => esc_th_cfg,
             unlock_pulse     => unlock_p,
-            attack_active    => attack_active or BTND,
+            attack_active    => total_attack_act,
             zeroize_pulse    => zeroize_pulse,
             alert_latched    => is_alert,
             zeroized_latched => is_zeroized,
@@ -439,8 +605,8 @@ begin
     LED(9)  <= snn_fires(2); -- N2 Fire
     LED(10) <= snn_fires(3);
     LED(11) <= glitch_act;
-    LED(12) <= attack_active;
-    LED(13) <= stress_en;
+    LED(12) <= total_attack_act;
+    LED(13) <= total_stress_en;
     LED(14) <= is_zeroized or v_zeroized;
     LED(15) <= is_alert;
 

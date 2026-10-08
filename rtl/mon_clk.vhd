@@ -59,6 +59,15 @@ architecture rtl of mon_clk is
     signal stall_counter : unsigned(15 downto 0) := (others => '0');
     signal locked_d1     : std_logic := '1';
 
+    -- Pipelined window evaluation signals
+    signal eval_pipe1     : std_logic := '0';
+    signal eval_pipe2     : std_logic := '0';
+    signal count_sample   : unsigned(15 downto 0) := (others => '0');
+    signal is_gross_pipe1 : std_logic := '0';
+    signal is_fast_pipe1  : std_logic := '0';
+    signal is_slow_pipe1  : std_logic := '0';
+    signal diff_mult_pipe1: unsigned(21 downto 0) := (others => '0');
+
 begin
 
     wnd_limit <= resize(wnd_us * 100, 16);
@@ -82,11 +91,12 @@ begin
     end process p_sync;
 
     ----------------------------------------------------------------------------
-    -- Frequency Evaluation & Stall Watchdog Process
+    -- Frequency Evaluation & Stall Watchdog Process (Pipelined for Timing Closure)
     ----------------------------------------------------------------------------
     p_eval : process(clk100)
         variable core_rising   : boolean;
         variable count_val     : integer;
+        variable diff_val      : integer;
         variable delta_pct     : integer;
         variable q_calc        : integer;
         variable upper_hard_th : integer;
@@ -106,6 +116,13 @@ begin
                 clk_soft_spike  <= '0';
                 clk_soft_q      <= (others => '0');
                 live_edge_count <= (others => '0');
+                eval_pipe1      <= '0';
+                eval_pipe2      <= '0';
+                count_sample    <= (others => '0');
+                is_gross_pipe1  <= '0';
+                is_fast_pipe1   <= '0';
+                is_slow_pipe1   <= '0';
+                diff_mult_pipe1 <= (others => '0');
             else
                 -- Defaults for 1-cycle pulses
                 clk_gross_h    <= '0';
@@ -136,35 +153,60 @@ begin
                     end if;
                 end if;
 
-                -- Window Evaluation
-                wnd_timer <= wnd_timer + 1;
+                -- Window Timer & Sampling
+                wnd_timer  <= wnd_timer + 1;
+                eval_pipe1 <= '0';
                 if wnd_timer >= wnd_limit then
-                    wnd_timer <= (others => '0');
-                    count_val := to_integer(edge_counter);
+                    wnd_timer       <= (others => '0');
+                    count_sample    <= edge_counter;
                     live_edge_count <= edge_counter;
-                    edge_counter <= (others => '0');
+                    edge_counter    <= (others => '0');
+                    eval_pipe1      <= '1';
+                end if;
 
-                    -- Nominal expected count in 100 us window is 2500 edges (@ 25 MHz)
-                    -- Hard Thresholds:
-                    upper_hard_th := 2500 + (2500 * to_integer(clk_hi_pct)) / 100; -- e.g. 2625
-                    lower_hard_th := 2500 - (2500 * to_integer(clk_lo_pct)) / 100; -- e.g. 2375
+                -- Pipeline Stage 1: Threshold checks & diff scaling (replaces /100 and /2500)
+                eval_pipe2 <= eval_pipe1;
+                if eval_pipe1 = '1' then
+                    count_val     := to_integer(count_sample);
+                    -- 2500 * pct / 100 = 25 * pct (no division needed)
+                    upper_hard_th := 2500 + (25 * to_integer(clk_hi_pct));
+                    lower_hard_th := 2500 - (25 * to_integer(clk_lo_pct));
 
-                    -- Gross Anomaly: > 2x nominal
                     if count_val > 5000 then
-                        clk_gross_h <= '1';
-                    elsif count_val > upper_hard_th then
-                        clk_fast_h  <= '1';
-                    elsif count_val < lower_hard_th then
-                        clk_slow_h  <= '1';
-                    end if;
-
-                    -- Soft Deviation Check (deviasi > CLK_SOFT_TH, default 1% = 25 count delta)
-                    if count_val > 2500 then
-                        delta_pct := ((count_val - 2500) * 100) / 2500;
+                        is_gross_pipe1 <= '1';
                     else
-                        delta_pct := ((2500 - count_val) * 100) / 2500;
+                        is_gross_pipe1 <= '0';
                     end if;
 
+                    if count_val > upper_hard_th then
+                        is_fast_pipe1 <= '1';
+                    else
+                        is_fast_pipe1 <= '0';
+                    end if;
+
+                    if count_val < lower_hard_th then
+                        is_slow_pipe1 <= '1';
+                    else
+                        is_slow_pipe1 <= '0';
+                    end if;
+
+                    if count_val > 2500 then
+                        diff_val := count_val - 2500;
+                    else
+                        diff_val := 2500 - count_val;
+                    end if;
+                    -- Multiply by 41: diff * 41 / 1024 is bit-exact equivalent of diff / 25
+                    diff_mult_pipe1 <= to_unsigned(diff_val * 41, 22);
+                end if;
+
+                -- Pipeline Stage 2: Register output flags
+                if eval_pipe2 = '1' then
+                    clk_gross_h <= is_gross_pipe1;
+                    clk_fast_h  <= is_fast_pipe1;
+                    clk_slow_h  <= is_slow_pipe1;
+
+                    -- Shift right by 10 (bits 21 downto 10) gives floor(diff / 25)
+                    delta_pct := to_integer(diff_mult_pipe1(21 downto 10));
                     if delta_pct >= to_integer(clk_soft_th) then
                         clk_soft_spike <= '1';
                         -- Q-mapping contract (§7.2): q = clamp(1 + floor(deviasi%), 1, 15)
@@ -176,7 +218,6 @@ begin
                         end if;
                         clk_soft_q <= to_unsigned(q_calc, 4);
                     end if;
-
                 end if;
 
             end if;

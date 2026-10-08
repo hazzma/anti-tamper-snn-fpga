@@ -9,6 +9,8 @@ vivado_output_snn/
 *.wdb
 *.vcd
 dfx_runtime.txt
+clockInfo.txt
+tight_setup_hold_pins.txt
 *.backup.*
 
 # Vivado project generated directories (keep .xpr)
