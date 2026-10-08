@@ -42,8 +42,8 @@ package pkg_weights_gen is
             CH_V_OVER_H      => to_signed(0, 8),
             CH_KEY_CORRUPT_H => to_signed(0, 8),
             CH_JTAG_H        => to_signed(0, 8),
-            CH_CLK_SOFT      => to_signed(11, 8),
-            CH_V_SOFT        => to_signed(11, 8),
+            CH_CLK_SOFT      => to_signed(50, 8),
+            CH_V_SOFT        => to_signed(50, 8),
             CH_SPARE_10      => to_signed(0, 8),
             CH_SPARE_11      => to_signed(0, 8)
         ),
@@ -76,7 +76,7 @@ package pkg_weights_gen is
     ----------------------------------------------------------------------------
     constant DEFAULT_M_SHIFTS : m_array_t := (
         0 => 3, -- N0: M=3
-        1 => 4, -- N1: M=4
+        1 => 2, -- N1: M=2 (Human finger timescale leak ~1.5s decay)
         2 => 4, -- N2: M=4
         3 => 4  -- N3: M=4
     );

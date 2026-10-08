@@ -114,91 +114,68 @@ Seluruh pemetaan pin disesuaikan dengan file master XDC resmi Digilent Nexys A7-
 
 ### 2. Slide Switches (Saklar Geser - 16 Switch Fisik)
 
-Di board Nexys A7-100T, deretan saklar tersusun dari **paling kiri (`SW[15]`)** hingga **paling kanan (`SW[0]`)**:
+> [!TIP]
+> **ATURAN SEDERHANA**: Bila **SEMUA SAKLAR KE BAWAH (`0`)**, sistem **OTOMATIS 100% NORMAL & BERSENJATA (ARMED)**! Anda tidak perlu mengatur kode biner rumit untuk menjalankan operasi normal.
 
-| Saklar | Pin FPGA | Default | Posisi & Fungsi Operasi |
+Tiga saklar paling kiri (`SW[15]`, `SW[14]`, `SW[13]`) didedikasikan secara independen sebagai pemicu serangan:
+
+| Saklar Fisik | Pin FPGA | Posisi Standar | Fungsi & Aksi Saat Dinaikkan |
 | :--- | :---: | :---: | :--- |
-| **SW[15]** | `V10` | `0` (Bawah) | **Scenario Selector [Bit 3]** (MSB dari 4 switch paling kiri). |
-| **SW[14]** | `U11` | `0` (Bawah) | **Scenario Selector [Bit 2]**. |
-| **SW[13]** | `U12` | `0` (Bawah) | **Scenario Selector [Bit 1]** *(Naikkan switch ini untuk SCEN2 Repeat-Probe Attack)*. |
-| **SW[12]** | `H6`  | `0` (Bawah) | **Scenario Selector [Bit 0]** (LSB dari 4 switch paling kiri). |
-| **SW[11]** | `T13` | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[10]** | `R16` | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[9]**  | `U8`  | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[8]**  | `T8`  | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[7]**  | `R13` | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[6]**  | `U18` | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[5]**  | `T18` | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[4]**  | `R17` | `0` (Bawah) | *Spare / Reserved*. |
-| **SW[3]**  | `R15` | `0` (Bawah) | **Telemetry Verbose Mode**: `1` = Stream log paket UART aktif, `0` = Minimalist log. |
-| **SW[2]**  | `M13` | `0` (Bawah) | **Manual Stressor RO**: `1` = Mengaktifkan bank pemanas on-chip penguras tegangan. |
-| **SW[1]**  | `L16` | **`1` (Atas)** | **SNN Guard Enable**: `1` = Analisis SNN Layer 3 Aktif, `0` = Bypass tanpa SNN. |
-| **SW[0]**  | `J15` | **`1` (Atas)** | **Monitor Subsystem Enable (ARMED)**: `1` = Bersenjata penuh (`Ar`), `0` = Disarm (`nr`). |
+| **`SW[15]`** *(Paling Kiri)* | `V10` | Bawah (`0`) | **Serangan Probe (Repeat-Probe)**: Menembakkan rentetan 5 glitch clock 50 MHz berturut-turut. |
+| **`SW[14]`** *(Ke-2 Kiri)* | `U11` | Bawah (`0`) | **Serangan Ekstrem (Extreme Overclock)**: Menembakkan 2 glitch clock 200 MHz ekstrem. |
+| **`SW[13]`** *(Ke-3 Kiri)* | `U12` | Bawah (`0`) | **Serangan Gabungan (Combined Attack)**: Menembakkan glitch clock + menyalakan pemanas RO on-chip penguras daya. |
+| **`SW[12]` s.d. `SW[1]`** | Beragam | Bawah (`0`) | *Reserved / Spare*. Biarkan di bawah (`0`). |
+| **`SW[0]`** *(Paling Kanan)* | `J15` | Bawah (`0`) | **Manual Disarm Switch**: `0` = Normal Bersenjata (`Ar`), `1` = Disarm/Bypass (`nr`). |
 
 ---
 
-### 📋 Cheat Sheet Biner: Konfigurasi 16 Saklar untuk Setiap Mode Uji Coba
+### 📋 Cara Pengujian Super Simpel (Tanpa Pusing Biner)
 
-Set saklar fisik board Nexys A7 Anda sesuai tabel biner di bawah (diurutkan dari **KIRI ke KANAN**):
-
-```text
-KIRI (SW15..SW12)        TENGAH (SW11..SW4)        KANAN (SW3..SW0)
-[15] [14] [13] [12]  |  [11][10][9][8] [7][6][5][4]  |  [3] [2] [1] [0]
-```
-
-| Mode / Skenario Pengujian | Biner 16 Saklar (Kiri ke Kanan) | Tombol Eksekusi | Status 7-Segment | Deskripsi Efek & Indikator |
+| Skenario Uji | Saklar Fisik | Tombol Eksekusi | Layar 7-Segment | Indikator LED & Efek Sistem |
 | :--- | :---: | :---: | :---: | :--- |
-| **1. Baseline Normal (Armed)** | `0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1` | *(Tidak ada)* | `0 = 0 0 0 0 A r` | Kondisi idle aman. `LED[0]` (H17) kedip 1 Hz. |
-| **2. Manual Glitch Test (Single)** | `0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`N17` (`BTNC`)** | `0 = 0 0 2 1 A r` $\rightarrow$ `0 = 0 0 0 0 A r` | 1 glitch disuntikkan. $V$ naik sesaat lalu bocor (leak) kembali ke 0. SNN membuktikan imun terhadap noise sesaat (tidak zeroize). |
-| **3. SCEN1: Single Glitch Ekstrem** | `0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`P18` (`BTND`)** | `0 = 0 0 5 0 A r` $\rightarrow$ `0 = 0 0 0 0 A r` | Glitch 200 MHz sesaat (50 $\mu$s). Terfilter oleh SNN. |
-| **4. SCEN2: Repeat-Probe Attack (ZEROIZE)** | **`0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 1`** | Tekan **`P18` (`BTND`)** | **`2 = 0 0 8 0 Z O`** | **Serangan Berulang 5 Glitch 50 MHz**. Membran terakumulasi melampaui $\Theta \ge 128$. SNN memicu **Zeroize!** `LED[14]` & `LED[15]` menyala merah! |
-| **5. SCEN3: Combined Glitch + Voltage Dip** | `0 0 1 1 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`P18` (`BTND`)** | **`2 = 0 0 8 0 Z O`** | Glitch simultan dengan bank ring oscillator pemanas aktif. Memicu alert multi-sensor dan zeroize! |
-| **6. SCEN4: Frequency Sweep Drift** | `0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`P18` (`BTND`)** | `0 = 0 0 2 0 A L` | Rekonfigurasi DRP bertahap menyapu frekuensi. Mendeteksi pelanggaran batas +5% dan membunyikan alert. |
+| **1. Kondisi Awal (Normal Baseline)** | **Semua Saklar di BAWAH (`0`)** | *(Tidak ada)* | `S 0 0 0 0 0 A r` | Sistem aman bersenjata. `LED[0]` (H17) denyut 1 Hz. `LED[2]` (J13) menyala hijau. |
+| **2. Tes Glitch Tunggal (WARNING)** | Semua Saklar di BAWAH (`0`) | Tekan **`N17` (`BTNC`)** 1 kali | `S 1 0 0 8 0 A L` | Terdeteksi **1 SPIKE** $\rightarrow$ Status **WARNING / ALERT (`AL`)**! `LED[15]` (**WARNING**) MENYALA! |
+| **3. Spam Tombol N17 (GSR / ZEROIZE)** | Semua Saklar di BAWAH (`0`) | Tekan **`N17` (`BTNC`)** ke-2 kali / spam | `S 2 0 0 0 0 Z O` | Terdeteksi **2 SPIKE** $\rightarrow$ **GSR (Global Security Reset / ZEROIZE)!** `LED[14]` (**GSR/Bahaya**) MENYALA! Kunci kripto dimusnahkan total, data di-wipe bersih ke `0000`! |
+| **4. Serangan Probe (V10)** | Naikkan **`V10` (`SW[15]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0 0 0 0 Z O` | Rentetan 5 glitch diluncurkan. SNN meletup, memicu **GSR / Zeroize** seketika! |
+| **5. Serangan Ekstrem (U11)** | Naikkan **`U11` (`SW[14]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0 0 0 0 Z O` | Clock 200 MHz menyengat core, memicu mitigasi **GSR / Zeroize**! |
+| **6. Serangan Gabungan (U12)** | Naikkan **`U12` (`SW[13]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0 0 0 0 Z O` | Pemanas chip aktif + clock glitch memicu mitigasi **GSR / Zeroize**! |
+| **7. Reset Pemulihan Sistem** | Turunkan switch serangan ke bawah | Tekan **`CPU_RESETN` (`C12`)** *(Tombol Merah)* | `S 0 0 0 0 0 A r` | Alarm dibersihkan, memori di-reload, status kembali normal bersenjata. |
 
 ---
 
-### 3. Indikator LED (16 LED di atas Saklar: `LED[15:0]`)
+### 3. Indikator LED (`LED[15:0]`)
 
 | LED | Pin FPGA | Sumber Sinyal | Arti Indikasi |
 | :--- | :---: | :--- | :--- |
-| **LED[0]** | `H17` | `heartbeat_led` | **1 Hz Heartbeat `clk100`**: Berkedip 1 kali per detik menandakan FPGA & osilator hidup normal. |
-| **LED[1]** | `K15` | `mmcm_locked` | **MMCM Locked**: Menyala stabil jika MMCM locked (clock 25 MHz valid). |
-| **LED[2]** | `J13` | `arm_status` | **Armed Indicator**: Menyala jika saklar `SW[0]` dinaikkan (sistem bersenjata). |
-| **LED[3]** | `N14` | `mode_ind` | **Sensor Mode**: Indikator mode sensor (`0`=A, `1`=C/Hybrid). |
-| **LED[4]** | `R18` | `clk_fast/slow` | **Clock Anomaly Hard Flag**: Menyala saat deviasi frekuensi clock terdeteksi melampaui $\pm 5\%$. |
-| **LED[5]** | `V17` | `clk_soft_spk` | **Clock Soft Anomaly**: Menyala saat anomali sub-threshold clock terdeteksi. |
-| **LED[6]** | `U17` | `v_soft_spk` | **Voltage Soft Anomaly**: Menyala saat dip tegangan terdeteksi. |
-| **LED[7]** | `U16` | `snn_fires(0)` | **Neuron 0 Fire**: SNN Neuron 0 (Transient) meletup. |
-| **LED[8]** | `V16` | `snn_fires(1)` | **Neuron 1 Fire**: SNN Neuron 1 (Repeat-Probe) meletup! |
-| **LED[9]** | `T15` | `snn_fires(2)` | **Neuron 2 Fire**: SNN Neuron 2 (Combined) meletup! |
-| **LED[10]**| `U14` | `snn_fires(3)` | **Neuron 3 Fire**: Spare Neuron meletup. |
-| **LED[11]**| `T16` | `glitch_act` | **Glitch In-Flight**: Menyala sesaat selama MMCM DRP sedang memodifikasi pembagi clock. |
-| **LED[12]**| `V15` | `seq_attacking`| **Attack Sequencer Active**: Menyala selama siklus burst serangan sedang berlangsung. |
-| **LED[13]**| `V14` | `stress_en` | **Stressor Active**: Menyala saat pemanas on-chip aktif. |
-| **LED[14]**| `V12` | `is_zeroized` | **ZEROIZED ACTIVE (Merah/Bahaya)**: Menyala terkunci jika kunci kripto telah dimusnahkan! |
-| **LED[15]**| `V11` | `is_alert` | **ALERT ACTIVE**: Menyala terkunci jika anomali telah melampaui batas kewaspadaan. |
+| **LED[0]** | `H17` | `heartbeat_led` | **1 Hz Heartbeat `clk100`**: Berkedip 1 Hz menandakan FPGA & osilator hidup normal. |
+| **LED[1]** | `K15` | `mmcm_locked` | **MMCM Locked**: Menyala jika clock 25 MHz valid dan terkunci. |
+| **LED[2]** | `J13` | `arm_active` | **Armed Indicator**: Menyala menandakan sistem bersenjata aktif (default ON saat semua switch 0). |
+| **LED[11]**| `T16` | `glitch_act` | **Glitch In-Flight**: Menyala sesaat selama MMCM sedang disuntik glitch. |
+| **LED[12]**| `V15` | `seq_attacking`| **Attack Active**: Menyala selama rangkaian burst serangan sedang dieksekusi. |
+| **LED[13]**| `V14` | `stress_en` | **Stressor Active**: Menyala saat pemanas on-chip penguras daya aktif. |
+| **LED[14]**| `V12` | `is_zeroized` | 🔴 **GSR / ZEROIZED ACTIVE (Bahaya)**: Menyala terkunci jika terjadi $\ge 2$ spike (kunci kripto dimusnahkan total)! |
+| **LED[15]**| `V11` | `is_alert` | 🟡 **WARNING ACTIVE**: Menyala khusus saat terjadi 1 spike (peringatan dini / Alert). |
 
 ---
 
-## 📟 Tampilan 7-Segment Display (Decoding 8 Digit)
+### 📟 Tampilan 7-Segment Display (8 Digit)
 
-Display 8 digit 7-segment pada Nexys A7 dikontrol melalui multiplexing 1 kHz aktif-rendah (`AN[7:0]` dan katoda `SEG[6:0]`, `DP`).
+Display 8 digit 7-segment pada Nexys A7 langsung mengabarkan jumlah spike dan status sistem secara real-time:
 
-```
+```text
  +-------+-------+   +-------+-------+-------+-------+   +-------+-------+
  |  AN7  |  AN6  |   |  AN5  |  AN4  |  AN3  |  AN2  |   |  AN1  |  AN0  |
- |  [ ATTACK ]   |   |   [ MEMBRANE POTENTIAL ]      |   |   [ STATE ]   |
- |  [ CLASS  ]   |   |        (HEX: 0000..0080)      |   |               |
+ |  [S]  | SPIKE |   |   [ MEMBRANE POTENTIAL / WIPED ]  |   [ STATUS ]  |
+ | LABEL | COUNT |   |   (HEX: 0000..0080 atau 0000 GSR) | (Ar / AL / ZO)|
  +-------+-------+   +-------+-------+-------+-------+   +-------+-------+
 ```
 
-### Rincian Pembagian Digit:
-
-| Posisi Digit | Nama Digit | Makna Tampilan | Contoh Nilai & Interpretasi |
-| :--- | :--- | :--- | :--- |
-| **Digit 7 - 6** *(Paling Kiri)* | `AN7`, `AN6` | **Attack Class ID**<br>Kategori serangan yang diklasifikasikan oleh neuron SNN. | • `00` : **Class 0** ($N_0$ - Transient Glitch sesaat)<br>• `01` : **Class 1** ($N_1$ - Repeat-Probe Attack berulang)<br>• `02` : **Class 2** ($N_2$ - Serangan gabungan Glitch + Voltage Drop)<br>• `03` : **Class 3** ($N_3$ - Voltage anomaly/Undervoltage)<br>• `--` : Tidak ada serangan aktif (Idle) |
-| **Digit 5 - 2** *(4 Digit Tengah)* | `AN5`, `AN4`,<br>`AN3`, `AN2` | **Live Neuron Potential ($V$)**<br>Nilai potensial membran neuron $N_1$ secara live (format Hexadecimal 16-bit). | • `0000` : Kondisi istirahat ($V_{rest} = 0$).<br>• `0021` : Anomali 1 terdeteksi ($V = 33$).<br>• `005A` : Serangan berlanjut berakumulasi ($V = 90$).<br>• `0080` : **Ambang Batas Pecah!** ($V_{th} = 128$). Neuron meletup (spike) dan memicu zeroize! |
-| **Digit 1 - 0** *(Paling Kanan)* | `AN1`, `AN0` | **System FSM State**<br>Status mesin kondisi keamanan subsistem. | • `nr` : **NORMAL** (Sistem berjalan normal)<br>• `Ar` : **ARMED** (Sistem dalam kewaspadaan penuh)<br>• `AL` : **ALERT** (Anomali terdeteksi, counter siaga)<br>• `ZO` : **ZEROIZED** (Tamper terbukti, sistem dihentikan) |
+| Posisi Digit | Tampilan | Arti & Maknanya |
+| :--- | :---: | :--- |
+| **Digit 7** *(Paling Kiri)* | **`S`** | Indikator **Spike Detector** subsistem SNN. |
+| **Digit 6** | **`0`, `1`, `2`, `3`..** | **Spike Counter**: Menunjukkan secara live **sudah berapa kali spike terjadi**! |
+| **Digit 5 - 2** *(4 Digit Tengah)* | **`0000` s.d. `0080`** | **Tegangan Membran / Indikator Data Terhapus**:<br>• Kondisi Normal: Menampilkan tegangan membran live $V$ dalam format Hexadecimal.<br>• **Kondisi GSR / Zeroize**: Menampilkan **`0000`** menandakan **seluruh data rahasia & kunci kripto telah dibersihkan/dihapus total!** |
+| **Digit 1 - 0** *(2 Digit Paling Kanan)* | **`Ar`, `AL`, `ZO`** | **Status Keamanan FSM**:<br>• **`Ar`** : **ARMED** (Kondisi normal bersenjata, Spike = 0)<br>• **`AL`** : **WARNING** (Peringatan anomali! Spike = 1)<br>• **`ZO`** : **GSR / ZEROIZED** (Global Security Reset! Spike $\ge$ 2, kunci kripto musnah!) |
 
 ---
 

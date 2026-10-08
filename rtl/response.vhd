@@ -52,6 +52,10 @@ architecture rtl of response is
     signal zeroize_p       : std_logic := '0';
     signal class_latched   : std_logic_vector(1 downto 0) := "00";
 
+    -- Edge Detectors for Incident Counting
+    signal hard_alert_d    : std_logic := '0';
+    signal snn_alert_d     : std_logic := '0';
+
     -- Cycle Latency Meter
     signal lat_timer       : unsigned(31 downto 0) := (others => '0');
     signal lat_captured    : unsigned(31 downto 0) := (others => '0');
@@ -81,8 +85,12 @@ begin
                 lat_timer     <= (others => '0');
                 lat_captured  <= (others => '0');
                 timing_active <= false;
+                hard_alert_d  <= '0';
+                snn_alert_d   <= '0';
             else
                 zeroize_p <= '0';
+                hard_alert_d <= hard_alert_l1;
+                snn_alert_d  <= snn_alert_l3;
 
                 -- Latency timer counter
                 if attack_active = '1' and not timing_active and is_zeroized = '0' then
@@ -100,10 +108,11 @@ begin
                     timing_active <= false;
                 end if;
 
-                -- Dual-Path Alert Evaluation:
-                -- Path 1: Instant L1 Hard Flag
-                -- Path 2: SNN Layer 3 (gated by BYPASS)
-                trigger_event := (hard_alert_l1 = '1') or ((snn_alert_l3 = '1') and (bypass_snn = '0'));
+                -- Dual-Path Alert Evaluation (Edge-triggered incident counting):
+                -- Path 1: Instant L1 Hard Flag Rising Edge
+                -- Path 2: SNN Layer 3 Threshold Fire (Luber) Rising Edge
+                trigger_event := ((hard_alert_l1 = '1' and hard_alert_d = '0') or 
+                                 ((snn_alert_l3 = '1' and snn_alert_d = '0') and (bypass_snn = '0')));
 
                 if trigger_event then
                     -- Record class

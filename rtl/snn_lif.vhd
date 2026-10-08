@@ -152,9 +152,16 @@ begin
 
                 for n in 0 to N_NEUR-1 loop
                     if leak_pipe = '1' then
-                        -- Pure leak step
-                        leak_val := shift_right(v_mem(n), m_shifts(n));
-                        v_mem(n) <= sat_add16(v_mem(n), -leak_val);
+                        -- Pure leak step: guaranteed to decay to zero
+                        if v_mem(n) > 0 then
+                            leak_val := shift_right(v_mem(n), m_shifts(n));
+                            if leak_val = 0 then
+                                leak_val := to_signed(1, 16);
+                            end if;
+                            v_mem(n) <= sat_add16(v_mem(n), -leak_val);
+                        elsif v_mem(n) < 0 then
+                            v_mem(n) <= (others => '0');
+                        end if;
                     else
                         -- Deposit & Threshold Evaluation
                         v_accum := sat_add16(v_mem(n), delta_pipe(n));

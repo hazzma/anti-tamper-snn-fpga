@@ -151,6 +151,12 @@ architecture rtl of top is
     signal seq_div_req        : std_logic := '0';
     signal seq_div_val        : unsigned(7 downto 0) := to_unsigned(40, 8);
 
+    -- Switch Edge Detectors & Manual Pulse
+    signal sw15_d, sw14_d, sw13_d : std_logic := '0';
+    signal sw15_edge, sw14_edge, sw13_edge : std_logic := '0';
+    signal seq_manual_spk     : std_logic := '0';
+    signal arm_active         : std_logic := '1';
+
     -- Combined Control Signals (Physical Hardware + UART Parser)
     signal total_glitch_req   : std_logic;
     signal total_glitch_div   : unsigned(7 downto 0);
@@ -160,7 +166,7 @@ architecture rtl of top is
     signal total_div_req      : std_logic;
     signal total_div_val      : unsigned(7 downto 0);
 
-    -- Switch-gated Monitor Flags (SW(0) = Monitor Subsystem Enable)
+    -- Switch-gated Monitor Flags (SW(0) = Monitor Bypass / Disarm)
     signal g_clk_fast_h       : std_logic;
     signal g_clk_slow_h       : std_logic;
     signal g_clk_stop_h       : std_logic;
@@ -201,17 +207,22 @@ begin
     -- Combined zeroize pulse (from response escalation OR manual UART wipe)
     total_zeroize <= zeroize_pulse or manual_wipe;
 
-    -- Switch-gated Monitor Flags (SW(0) = Monitor Subsystem Enable)
-    g_clk_fast_h    <= clk_fast_h and SW(0);
-    g_clk_slow_h    <= clk_slow_h and SW(0);
-    g_clk_stop_h    <= clk_stop_h and SW(0);
-    g_mmcm_unlock_h <= mmcm_unlock_h and SW(0);
-    g_v_under_h     <= v_under_h and SW(0);
-    g_v_over_h      <= v_over_h and SW(0);
-    g_clk_soft_spk  <= clk_soft_spk and SW(0);
-    g_clk_soft_q    <= clk_soft_q when SW(0) = '1' else (others => '0');
-    g_v_soft_spk    <= v_soft_spk and SW(0);
-    g_v_soft_q      <= v_soft_q when SW(0) = '1' else (others => '0');
+    -- Active Security Armed State: Armed by default when all switches are DOWN (0)
+    arm_active <= arm_cfg and (not SW(0));
+
+    -- Monitor flags (Active by default, manual pulse from N17 injected directly to SNN Leaky Bucket)
+    g_clk_fast_h    <= clk_fast_h and (not SW(0));
+    g_clk_slow_h    <= clk_slow_h and (not SW(0));
+    g_clk_stop_h    <= clk_stop_h and (not SW(0));
+    g_mmcm_unlock_h <= mmcm_unlock_h and (not SW(0));
+    g_v_under_h     <= v_under_h and (not SW(0));
+    g_v_over_h      <= v_over_h and (not SW(0));
+    g_clk_soft_spk  <= (clk_soft_spk and (not SW(0))) or seq_manual_spk;
+    g_clk_soft_q    <= to_unsigned(1, 4) when seq_manual_spk = '1' else
+                       clk_soft_q when SW(0) = '0' else
+                       (others => '0');
+    g_v_soft_spk    <= v_soft_spk and (not SW(0));
+    g_v_soft_q      <= v_soft_q when SW(0) = '0' else (others => '0');
 
     -- OR-reduction of all Layer 1 Hard Flags
     hard_alert_or <= g_clk_fast_h or g_clk_slow_h or g_clk_stop_h or
@@ -242,6 +253,13 @@ begin
                 btnc_pulse     <= '0';
                 btnu_pulse     <= '0';
                 btnd_pulse     <= '0';
+                sw15_d         <= '0';
+                sw14_d         <= '0';
+                sw13_d         <= '0';
+                sw15_edge      <= '0';
+                sw14_edge      <= '0';
+                sw13_edge      <= '0';
+                seq_manual_spk <= '0';
                 seq_state      <= SEQ_IDLE;
                 seq_burst_cnt  <= 0;
                 seq_timer      <= (others => '0');
@@ -262,53 +280,61 @@ begin
                 btnd_d1    <= BTND; btnd_d2 <= btnd_d1;
                 btnd_pulse <= btnd_d1 and not btnd_d2;
 
+                sw15_d    <= SW(15);
+                sw15_edge <= SW(15) and not sw15_d;
+
+                sw14_d    <= SW(14);
+                sw14_edge <= SW(14) and not sw14_d;
+
+                sw13_d    <= SW(13);
+                sw13_edge <= SW(13) and not sw13_d;
+
                 seq_glitch_req <= '0';
                 seq_div_req    <= '0';
+                seq_manual_spk <= '0';
 
                 case seq_state is
                     when SEQ_IDLE =>
                         seq_timer <= (others => '0');
                         if btnc_pulse = '1' then
+                            -- Manual Glitch Test (1 Press = 1 Spike Deposit!)
                             seq_glitch_req <= '1';
                             seq_glitch_div <= to_unsigned(20, 8); -- 50 MHz glitch
                             seq_glitch_dur <= to_unsigned(50, 16); -- 50 us duration
+                            seq_manual_spk <= '1'; -- Generates exactly 1 spike!
+                        elsif sw15_edge = '1' or (btnd_pulse = '1' and SW(15) = '1') then
+                            -- SW[15] (V10, paling kiri): Serangan Probe (Repeat-Probe Attack, 6 bursts -> 2x Luber -> GSR)
+                            seq_burst_cnt  <= 6;
+                            seq_state      <= SEQ_BURST_GLITCH;
+                            seq_attacking  <= '1';
+                            seq_glitch_req <= '1';
+                            seq_manual_spk <= '1';
+                            seq_glitch_div <= to_unsigned(20, 8);
+                            seq_glitch_dur <= to_unsigned(50, 16);
+                        elsif sw14_edge = '1' or (btnd_pulse = '1' and SW(14) = '1') then
+                            -- SW[14] (U11, ke-2 dari kiri): Serangan Ekstrem (200 MHz Overclock Glitch)
+                            seq_burst_cnt  <= 2;
+                            seq_state      <= SEQ_BURST_GLITCH;
+                            seq_attacking  <= '1';
+                            seq_glitch_req <= '1';
+                            seq_manual_spk <= '1';
+                            seq_glitch_div <= to_unsigned(5, 8); -- 200 MHz!
+                            seq_glitch_dur <= to_unsigned(50, 16);
+                        elsif sw13_edge = '1' or (btnd_pulse = '1' and SW(13) = '1') then
+                            -- SW[13] (U12, ke-3 dari kiri): Serangan Gabungan (Glitch + Stressor Pemanas, 6 bursts)
+                            seq_burst_cnt  <= 6;
+                            seq_stress_en  <= '1';
+                            seq_state      <= SEQ_BURST_GLITCH;
+                            seq_attacking  <= '1';
+                            seq_glitch_req <= '1';
+                            seq_manual_spk <= '1';
+                            seq_glitch_div <= to_unsigned(20, 8);
+                            seq_glitch_dur <= to_unsigned(50, 16);
                         elsif btnu_pulse = '1' then
+                            -- BTNU (M18): Manual Sweep
                             seq_state     <= SEQ_SWEEP;
                             seq_attacking <= '1';
                             seq_div_val   <= to_unsigned(40, 8);
-                        elsif btnd_pulse = '1' then
-                            case SW(15 downto 12) is
-                                when "0000" => -- SCEN0: Normal
-                                    null;
-                                when "0001" => -- SCEN1: Single Glitch (200 MHz, div=5)
-                                    seq_burst_cnt  <= 1;
-                                    seq_state      <= SEQ_BURST_GLITCH;
-                                    seq_attacking  <= '1';
-                                    seq_glitch_req <= '1';
-                                    seq_glitch_div <= to_unsigned(5, 8);
-                                    seq_glitch_dur <= to_unsigned(50, 16);
-                                when "0010" => -- SCEN2: Repeat-Probe (5 glitches, 50 MHz, div=20)
-                                    seq_burst_cnt  <= 5;
-                                    seq_state      <= SEQ_BURST_GLITCH;
-                                    seq_attacking  <= '1';
-                                    seq_glitch_req <= '1';
-                                    seq_glitch_div <= to_unsigned(20, 8);
-                                    seq_glitch_dur <= to_unsigned(50, 16);
-                                when "0011" => -- SCEN3: Combined Glitch + Stress
-                                    seq_burst_cnt  <= 5;
-                                    seq_stress_en  <= '1';
-                                    seq_state      <= SEQ_BURST_GLITCH;
-                                    seq_attacking  <= '1';
-                                    seq_glitch_req <= '1';
-                                    seq_glitch_div <= to_unsigned(20, 8);
-                                    seq_glitch_dur <= to_unsigned(50, 16);
-                                when "0100" => -- SCEN4: Frequency Sweep
-                                    seq_state     <= SEQ_SWEEP;
-                                    seq_attacking <= '1';
-                                    seq_div_val   <= to_unsigned(40, 8);
-                                when others =>
-                                    null;
-                            end case;
                         end if;
 
                     when SEQ_BURST_GLITCH =>
@@ -318,6 +344,7 @@ begin
                             if seq_burst_cnt > 1 then
                                 seq_burst_cnt  <= seq_burst_cnt - 1;
                                 seq_glitch_req <= '1';
+                                seq_manual_spk <= '1';
                             else
                                 seq_burst_cnt <= 0;
                                 seq_stress_en <= '0';
@@ -572,8 +599,8 @@ begin
             hard_alert_l1    => hard_alert_or,
             snn_alert_l3     => snn_alert,
             snn_class_in     => snn_class,
-            arm_en           => arm_cfg and SW(0),
-            bypass_snn       => bypass_cfg or (not SW(1)),
+            arm_en           => arm_active,
+            bypass_snn       => bypass_cfg,
             esc_th           => esc_th_cfg,
             unlock_pulse     => unlock_p,
             attack_active    => total_attack_act,
@@ -596,11 +623,12 @@ begin
             rstn           => rstn,
             leak_tick_out  => leak_tick,
             heartbeat_led  => heartbeat_led,
-            arm_status     => arm_cfg and SW(0),
+            arm_status     => arm_active,
             alert_status   => is_alert,
             zeroize_status => is_zeroized or v_zeroized,
             active_class   => active_class,
             v_n1_membrane  => v_membranes(1),
+            spike_count    => alert_cnt_out,
             seg_an         => AN,
             seg_cath       => SEG,
             seg_dp         => DP
@@ -611,7 +639,7 @@ begin
     ----------------------------------------------------------------------------
     LED(0)  <= heartbeat_led;
     LED(1)  <= mmcm_locked;
-    LED(2)  <= arm_cfg and SW(0);
+    LED(2)  <= arm_active;
     LED(3)  <= sensor_mode_cfg(1); -- Mode ind
     LED(4)  <= clk_fast_h or clk_slow_h;
     LED(5)  <= clk_soft_spk;
@@ -623,7 +651,7 @@ begin
     LED(11) <= glitch_act;
     LED(12) <= total_attack_act;
     LED(13) <= total_stress_en;
-    LED(14) <= is_zeroized or v_zeroized;
-    LED(15) <= is_alert;
+    LED(14) <= is_zeroized or v_zeroized;                  -- GSR ACTIVE (LED14 ON, Red Hazard)
+    LED(15) <= is_alert and not (is_zeroized or v_zeroized); -- WARNING ACTIVE (LED15 ON only when 1 spike warning)
 
 end architecture rtl;

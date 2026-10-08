@@ -26,6 +26,7 @@ entity telemetry is
         zeroize_status : in  std_logic;
         active_class   : in  std_logic_vector(1 downto 0);
         v_n1_membrane  : in  signed(15 downto 0);
+        spike_count    : in  unsigned(7 downto 0);
         
         -- 7-Segment Display Outputs (Nexys A7-100T)
         seg_an         : out std_logic_vector(7 downto 0);
@@ -36,8 +37,8 @@ end entity telemetry;
 
 architecture rtl of telemetry is
 
-    -- 1 ms Leak Tick Generator Counter (100,000 cycles)
-    signal leak_counter : unsigned(19 downto 0) := (others => '0');
+    -- 200 ms Leak Tick Generator Counter (20,000,000 cycles @ 100MHz)
+    signal leak_counter : unsigned(25 downto 0) := (others => '0');
     signal leak_p       : std_logic := '0';
 
     -- 1 Hz Heartbeat Counter (100,000,000 cycles)
@@ -51,7 +52,7 @@ architecture rtl of telemetry is
     signal an_reg       : std_logic_vector(7 downto 0) := (others => '1');
     signal cath_reg     : std_logic_vector(6 downto 0) := (others => '1');
 
-    -- Membrane Peak-Hold for 7-Segment Display (250 ms persistence for human visibility)
+    -- Membrane Peak-Hold for 7-Segment Display (50 ms persistence for human visibility)
     signal v_disp_val   : signed(15 downto 0) := (others => '0');
     signal v_hold_timer : unsigned(24 downto 0) := (others => '0');
 
@@ -97,8 +98,8 @@ begin
                 hb_counter   <= (others => '0');
                 hb_reg       <= '0';
             else
-                -- 1 ms Leak Tick generator (100,000 cycles)
-                if leak_counter >= 99999 then
+                -- 200 ms Leak Tick generator (20,000,000 cycles @ 100MHz)
+                if leak_counter >= 19999999 then
                     leak_counter <= (others => '0');
                     leak_p       <= '1';
                 else
@@ -118,7 +119,7 @@ begin
     end process p_timer;
 
     ----------------------------------------------------------------------------
-    -- Membrane Peak-Hold Process (Holds peak for 250 ms for human visual persistence)
+    -- Membrane Peak-Hold Process (Holds peak for 50 ms for human visual persistence)
     ----------------------------------------------------------------------------
     p_v_hold : process(clk100)
     begin
@@ -131,7 +132,7 @@ begin
                     v_disp_val   <= v_n1_membrane;
                     v_hold_timer <= (others => '0');
                 else
-                    if v_hold_timer >= 24999999 then -- 250 ms @ 100 MHz
+                    if v_hold_timer >= 4999999 then -- 50 ms @ 100 MHz
                         v_hold_timer <= (others => '0');
                         v_disp_val   <= v_n1_membrane;
                     else
@@ -170,39 +171,56 @@ begin
                 an_reg(digit_idx) <= '0';
 
                 -- Display content mapping:
-                -- Digit 7:6 => Active Class
-                -- Digit 5:2 => V[n1] membrane hex (peak-held for visibility)
-                -- Digit 1:0 => State (AL, ZO, AR, NR)
+                -- Digit 7   => 'S' (Spike indicator)
+                -- Digit 6   => Spike Count (0, 1, 2, ...)
+                -- Digit 5:2 => Live V[n1] (or "0000" if ZEROIZED / wiped)
+                -- Digit 1:0 => State (Ar = Armed, AL = Warning, ZO = GSR/Zeroized)
                 case digit_idx is
                     when 7 =>
-                        cath_reg <= hex_to_7seg("00" & active_class);
+                        cath_reg <= "0010010"; -- 'S'
                     when 6 =>
-                        cath_reg <= "0110111"; -- '=' or separator
+                        cath_reg <= hex_to_7seg(std_logic_vector(spike_count(3 downto 0)));
                     when 5 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(15 downto 12)));
+                        if zeroize_status = '1' then
+                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
+                        else
+                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(15 downto 12)));
+                        end if;
                     when 4 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(11 downto 8)));
+                        if zeroize_status = '1' then
+                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
+                        else
+                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(11 downto 8)));
+                        end if;
                     when 3 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(7 downto 4)));
+                        if zeroize_status = '1' then
+                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
+                        else
+                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(7 downto 4)));
+                        end if;
                     when 2 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(3 downto 0)));
+                        if zeroize_status = '1' then
+                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
+                        else
+                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(3 downto 0)));
+                        end if;
                     when 1 =>
-                        if alert_status = '1' then
-                            cath_reg <= "0001000"; -- 'A'
-                        elsif zeroize_status = '1' then
-                            cath_reg <= "0100100"; -- 'Z' (approx as 2)
+                        if zeroize_status = '1' then
+                            cath_reg <= "0100100"; -- 'Z' (GSR / Zeroized)
+                        elsif alert_status = '1' then
+                            cath_reg <= "0001000"; -- 'A' (Warning / Alert)
                         elsif arm_status = '1' then
                             cath_reg <= "0001000"; -- 'A'
                         else
                             cath_reg <= "0101011"; -- 'n'
                         end if;
                     when others => -- digit 0
-                        if alert_status = '1' then
-                            cath_reg <= "1000111"; -- 'L'
-                        elsif zeroize_status = '1' then
-                            cath_reg <= "1000000"; -- '0' / 'O'
+                        if zeroize_status = '1' then
+                            cath_reg <= "1000000"; -- 'O' / '0'
+                        elsif alert_status = '1' then
+                            cath_reg <= "1000111"; -- 'L' (AL = Warning)
                         elsif arm_status = '1' then
-                            cath_reg <= "0101111"; -- 'r'
+                            cath_reg <= "0101111"; -- 'r' (Ar = Armed)
                         else
                             cath_reg <= "0101111"; -- 'r'
                         end if;
