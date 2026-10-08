@@ -101,13 +101,15 @@ begin
                     key_primary <= key_in;
                     key_shadow  <= key_in;
                     zeroized    <= '0';
-                elsif corrupt_inject_h = '1' then
-                    -- Extreme Mode Memory Integrity Tamper (SW12 / H6): corrupt high word
-                    key_primary(127 downto 112) <= x"DEAD";
-                elsif cosmic_flip_p = '1' then
-                    -- Manual Cosmic Ray Single Event Upset (BTND): flip 1 bit on display (0123 <-> 0122)
-                    key_primary(112) <= not key_primary(112);
-                    key_shadow(112)  <= not key_shadow(112);
+                elsif zeroized = '0' then
+                    if corrupt_inject_h = '1' then
+                        -- Extreme Mode Memory Integrity Tamper (SW12 / H6): corrupt high word
+                        key_primary(127 downto 112) <= x"DEAD";
+                    elsif cosmic_flip_p = '1' then
+                        -- Manual Cosmic Ray Single Event Upset (BTND): flip 1 bit on display (0123 <-> 0122)
+                        key_primary(112) <= not key_primary(112);
+                        key_shadow(112)  <= not key_shadow(112);
+                    end if;
                 end if;
 
                 -- 32-bit LFSR Update
