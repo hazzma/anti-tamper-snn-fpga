@@ -112,42 +112,71 @@ Seluruh pemetaan pin disesuaikan dengan file master XDC resmi Digilent Nexys A7-
 
 ---
 
-### 2. Slide Switches (Saklar Geser)
+### 2. Slide Switches (Saklar Geser - 16 Switch Fisik)
 
-| Saklar | Pin FPGA | Nilai | Deskripsi & Operasi |
-| :--- | :--- | :--- | :--- |
-| **SW[0]** | `J15` | `0` = Bypass<br>`1` = Enable | **Monitor Subsystem Enable**: Mengaktifkan seluruh sensor hardware (Clock RO & Voltage RO). |
-| **SW[1]** | `L16` | `0` = Pass-through<br>`1` = SNN Active | **SNN Layer 3 Guard Enable**: Menghubungkan output SNN ke unit respons. Jika `0`, output bypass tanpa analisis SNN. |
-| **SW[2]** | `M13` | `0` / `1` | **Stressor RO Enable**: Mengaktifkan bank ring oscillator pemanas on-chip untuk uji drop tegangan. |
-| **SW[3]** | `R15` | `0` / `1` | **Telemetry Verbose Mode**: Mengaktifkan pengiriman streaming paket event melalui UART secara real-time. |
-| **SW[11:4]** | - | - | *Reserved untuk konfigurasi ambang batas dinamis.* |
-| **SW[15:12]** | `V10`, `U11`, `U12`, `H6` | *Preset ID* | **Attack Scenario Selector** (Digunakan saat menekan tombol `BTND`): |
-| | | `0000` (0x0) | **SCEN0**: Normal Execution (Bypass / Kontrol Tanpa Serangan) |
-| | | `0001` (0x1) | **SCEN1**: Single Isolated Glitch (Transient test) |
-| | | `0010` (0x2) | **SCEN2**: Repeat-Probe Attack (5 glitch berturut-turut untuk membuktikan leaky integration SNN) |
-| | | `0011` (0x3) | **SCEN3**: Combined Glitch + Voltage Drop Anomaly |
-| | | `0100` (0x4) | **SCEN4**: Dynamic Frequency Drift / Sweep Overclocking |
+Di board Nexys A7-100T, deretan saklar tersusun dari **paling kiri (`SW[15]`)** hingga **paling kanan (`SW[0]`)**:
+
+| Saklar | Pin FPGA | Default | Posisi & Fungsi Operasi |
+| :--- | :---: | :---: | :--- |
+| **SW[15]** | `V10` | `0` (Bawah) | **Scenario Selector [Bit 3]** (MSB dari 4 switch paling kiri). |
+| **SW[14]** | `U11` | `0` (Bawah) | **Scenario Selector [Bit 2]**. |
+| **SW[13]** | `U12` | `0` (Bawah) | **Scenario Selector [Bit 1]** *(Naikkan switch ini untuk SCEN2 Repeat-Probe Attack)*. |
+| **SW[12]** | `H6`  | `0` (Bawah) | **Scenario Selector [Bit 0]** (LSB dari 4 switch paling kiri). |
+| **SW[11]** | `T13` | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[10]** | `R16` | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[9]**  | `U8`  | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[8]**  | `T8`  | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[7]**  | `R13` | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[6]**  | `U18` | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[5]**  | `T18` | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[4]**  | `R17` | `0` (Bawah) | *Spare / Reserved*. |
+| **SW[3]**  | `R15` | `0` (Bawah) | **Telemetry Verbose Mode**: `1` = Stream log paket UART aktif, `0` = Minimalist log. |
+| **SW[2]**  | `M13` | `0` (Bawah) | **Manual Stressor RO**: `1` = Mengaktifkan bank pemanas on-chip penguras tegangan. |
+| **SW[1]**  | `L16` | **`1` (Atas)** | **SNN Guard Enable**: `1` = Analisis SNN Layer 3 Aktif, `0` = Bypass tanpa SNN. |
+| **SW[0]**  | `J15` | **`1` (Atas)** | **Monitor Subsystem Enable (ARMED)**: `1` = Bersenjata penuh (`Ar`), `0` = Disarm (`nr`). |
 
 ---
 
-### 3. Indikator LED & RGB LED
+### 📋 Cheat Sheet Biner: Konfigurasi 16 Saklar untuk Setiap Mode Uji Coba
 
-#### Status LEDs (16 LED Hijau: `LED[15:0]`)
-- **`LED[0]`** (`H17`): Heartbeat `clk100` (Berkedip 1 Hz menandakan osilator 100 MHz aktif).
-- **`LED[1]`** (`K15`): Heartbeat `clk_core` (Berkedip menandakan domain MMCM 25 MHz aktif).
-- **`LED[2]`** (`J13`): MMCM Locked Status (`1` = MMCM terkunci stabil).
-- **`LED[3]`** (`N14`): Monitor Activity Flag (Menyala saat mendeteksi clock ratio anomaly).
-- **`LED[4]`** (`R18`): Voltage Drop Flag (Menyala saat RO delay line mendeteksi drop tegangan internal).
-- **`LED[7:5]`** (`V17`, `U17`, `U16`): Indikator Spike Output Neuron SNN ($N_0, N_1, N_2$).
-- **`LED[14:8]`**: Event Counter / Activity Bar.
-- **`LED[15]`** (`L1`): **ZEROIZE ACTIVE INDICATION** (Menyala terang saat sistem ter-zeroize).
+Set saklar fisik board Nexys A7 Anda sesuai tabel biner di bawah (diurutkan dari **KIRI ke KANAN**):
 
-#### Multi-Color RGB LEDs
-- **RGB 1 (`LED16`: `R12`=Red, `M16`=Green, `N15`=Blue)**: Status Keamanan Sistem (Security State FSM)
-  - 🟢 **HIJAU**: Status **NORMAL** (Aman, tidak ada anomali).
-  - 🟡 **KUNING**: Status **ARMED / ALERT** (Anomali terdeteksi, membran neuron sedang terintegrasi).
-  - 🔴 **MERAH**: Status **ZEROIZED** (Tamper terkonfirmasi! Kunci kripto telah dimusnahkan).
-- **RGB 2 (`LED17`: `G14`=Red, `R11`=Green, `N16`=Blue)**: Status Core Integrity & CDC Health.
+```text
+KIRI (SW15..SW12)        TENGAH (SW11..SW4)        KANAN (SW3..SW0)
+[15] [14] [13] [12]  |  [11][10][9][8] [7][6][5][4]  |  [3] [2] [1] [0]
+```
+
+| Mode / Skenario Pengujian | Biner 16 Saklar (Kiri ke Kanan) | Tombol Eksekusi | Status 7-Segment | Deskripsi Efek & Indikator |
+| :--- | :---: | :---: | :---: | :--- |
+| **1. Baseline Normal (Armed)** | `0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1` | *(Tidak ada)* | `0 = 0 0 0 0 A r` | Kondisi idle aman. `LED[0]` (H17) kedip 1 Hz. |
+| **2. Manual Glitch Test (Single)** | `0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`N17` (`BTNC`)** | `0 = 0 0 2 1 A r` $\rightarrow$ `0 = 0 0 0 0 A r` | 1 glitch disuntikkan. $V$ naik sesaat lalu bocor (leak) kembali ke 0. SNN membuktikan imun terhadap noise sesaat (tidak zeroize). |
+| **3. SCEN1: Single Glitch Ekstrem** | `0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`P18` (`BTND`)** | `0 = 0 0 5 0 A r` $\rightarrow$ `0 = 0 0 0 0 A r` | Glitch 200 MHz sesaat (50 $\mu$s). Terfilter oleh SNN. |
+| **4. SCEN2: Repeat-Probe Attack (ZEROIZE)** | **`0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 1`** | Tekan **`P18` (`BTND`)** | **`2 = 0 0 8 0 Z O`** | **Serangan Berulang 5 Glitch 50 MHz**. Membran terakumulasi melampaui $\Theta \ge 128$. SNN memicu **Zeroize!** `LED[14]` & `LED[15]` menyala merah! |
+| **5. SCEN3: Combined Glitch + Voltage Dip** | `0 0 1 1 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`P18` (`BTND`)** | **`2 = 0 0 8 0 Z O`** | Glitch simultan dengan bank ring oscillator pemanas aktif. Memicu alert multi-sensor dan zeroize! |
+| **6. SCEN4: Frequency Sweep Drift** | `0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 1` | Tekan **`P18` (`BTND`)** | `0 = 0 0 2 0 A L` | Rekonfigurasi DRP bertahap menyapu frekuensi. Mendeteksi pelanggaran batas +5% dan membunyikan alert. |
+
+---
+
+### 3. Indikator LED (16 LED di atas Saklar: `LED[15:0]`)
+
+| LED | Pin FPGA | Sumber Sinyal | Arti Indikasi |
+| :--- | :---: | :--- | :--- |
+| **LED[0]** | `H17` | `heartbeat_led` | **1 Hz Heartbeat `clk100`**: Berkedip 1 kali per detik menandakan FPGA & osilator hidup normal. |
+| **LED[1]** | `K15` | `mmcm_locked` | **MMCM Locked**: Menyala stabil jika MMCM locked (clock 25 MHz valid). |
+| **LED[2]** | `J13` | `arm_status` | **Armed Indicator**: Menyala jika saklar `SW[0]` dinaikkan (sistem bersenjata). |
+| **LED[3]** | `N14` | `mode_ind` | **Sensor Mode**: Indikator mode sensor (`0`=A, `1`=C/Hybrid). |
+| **LED[4]** | `R18` | `clk_fast/slow` | **Clock Anomaly Hard Flag**: Menyala saat deviasi frekuensi clock terdeteksi melampaui $\pm 5\%$. |
+| **LED[5]** | `V17` | `clk_soft_spk` | **Clock Soft Anomaly**: Menyala saat anomali sub-threshold clock terdeteksi. |
+| **LED[6]** | `U17` | `v_soft_spk` | **Voltage Soft Anomaly**: Menyala saat dip tegangan terdeteksi. |
+| **LED[7]** | `U16` | `snn_fires(0)` | **Neuron 0 Fire**: SNN Neuron 0 (Transient) meletup. |
+| **LED[8]** | `V16` | `snn_fires(1)` | **Neuron 1 Fire**: SNN Neuron 1 (Repeat-Probe) meletup! |
+| **LED[9]** | `T15` | `snn_fires(2)` | **Neuron 2 Fire**: SNN Neuron 2 (Combined) meletup! |
+| **LED[10]**| `U14` | `snn_fires(3)` | **Neuron 3 Fire**: Spare Neuron meletup. |
+| **LED[11]**| `T16` | `glitch_act` | **Glitch In-Flight**: Menyala sesaat selama MMCM DRP sedang memodifikasi pembagi clock. |
+| **LED[12]**| `V15` | `seq_attacking`| **Attack Sequencer Active**: Menyala selama siklus burst serangan sedang berlangsung. |
+| **LED[13]**| `V14` | `stress_en` | **Stressor Active**: Menyala saat pemanas on-chip aktif. |
+| **LED[14]**| `V12` | `is_zeroized` | **ZEROIZED ACTIVE (Merah/Bahaya)**: Menyala terkunci jika kunci kripto telah dimusnahkan! |
+| **LED[15]**| `V11` | `is_alert` | **ALERT ACTIVE**: Menyala terkunci jika anomali telah melampaui batas kewaspadaan. |
 
 ---
 
@@ -302,27 +331,40 @@ Hasil pengujian dapat ditemukan di folder `results/exp_*.csv`.
 
 ---
 
-### Pengujian 5: Pengujian Manual Tanpa PC
+### Pengujian 5: Pengujian Mandiri Hardware Tanpa PC (On-Board Live Test)
 
-Anda dapat menguji sistem secara mandiri hanya menggunakan tombol dan display pada board:
+Anda dapat menguji seluruh fungsi sistem secara mandiri langsung di board Nexys A7:
 
-1. **Inisialisasi**:
-   - Tekan tombol merah `CPU_RESETN`.
-   - Pastikan LED RGB 1 menyala **HIJAU** dan 7-segment menampilkan `---- 0000 nr`.
-2. **Uji Serangan Glitch Tunggal (Transient Filter)**:
-   - Tekan tombol tengah `BTNC` **satu kali**.
-   - Amati 7-segment: Potensial $V$ akan naik sesaat (misal `0021`), namun segera meluruh (leak) kembali mendekati `0000` tanpa memicu zeroize.
-   - Hal ini membuktikan SNN berhasil menyaring noise tanpa false positive!
-3. **Uji Serangan Berulang (Repeat-Probe Attack)**:
-   - Tekan tombol tengah `BTNC` **berulang kali secara cepat** (5 kali berturut-turut).
-   - Amati 7-segment: Potensial $V$ bertambah drastis: `0021` $\rightarrow$ `0042` $\rightarrow$ `0063` $\rightarrow$ `0080`.
-   - Begitu mencapai `0080` ($V_{th}$), neuron meletup!
-   - 7-segment berubah menjadi `01 0080 ZO`.
-   - LED RGB 1 seketika menyala **MERAH**, dan `LED[15]` menyala menandakan kunci rahasia telah dimusnahkan.
-4. **Uji Skenario Preset**:
-   - Ubah saklar `SW[15:12]` ke `0011` (Skenario 3: Combined Attack).
-   - Tekan tombol bawah `BTND`.
-   - Sistem akan mengeksekusi serangan simultan, mengklasifikasikan Class 2 (`02`), dan melakukan mitigasi.
+1. **Inisialisasi & Kondisi Awal (Armed Baseline)**:
+   - Naikkan saklar **`SW[0]` (`J15`)** dan **`SW[1]` (`L16`)** ke atas (`1 1` di paling kanan).
+   - Pastikan seluruh saklar lainnya (`SW[15..2]`) dalam posisi **BAWAH** (`0`).
+   - Tekan tombol merah `CPU_RESETN` (`C12`) sesaat untuk reset awal.
+   - **Tampilan Board**:
+     - `LED[0]` (`H17`) berkedip 1 Hz (denyut jantung clock).
+     - `LED[1]` (`K15`) dan `LED[2]` (`J13`) menyala hijau (MMCM locked & Armed).
+     - 7-Segment menampilkan: **`0 = 0 0 0 0 A r`** *(Class 0, V=0000, ARMED)*.
+
+2. **Uji Serangan Glitch Tunggal (Transient Filter Imunitas SNN)**:
+   - Tekan tombol tengah **`BTNC` (`N17`)** satu kali.
+   - **Pengamatan**:
+     - MMCM menyuntikkan 1 pulsa clock 50 MHz (50 $\mu$s).
+     - Tegangan membran melonjak sesaat di digit 5..2 (misal `0021`) berkat fitur peak-hold 250 ms, kemudian bocor (*leaked*) kembali ke `0000`.
+     - Status tetap **`Ar`** (tidak zeroize). Ini membuktikan SNN berhasil memfilter gangguan sesaat agar tidak memicu alarm palsu.
+
+3. **Uji Repeat-Probe Attack $\rightarrow$ ZEROIZE (Skenario 2)**:
+   - Naikkan saklar **`SW[13]` (`U12`)** ke atas. Konfigurasi 4 switch paling kiri menjadi: **`0 0 1 0`**.
+   - Tekan tombol bawah **`P18` (`BTND`)**.
+   - **Pengamatan Hardware**:
+     - Rangkaian hardware sequencer menembakkan rentetan 5 glitch 50 MHz berturut-turut.
+     - Potensial membran $N_1$ terakumulasi melampaui $\Theta \ge 128$ (`0080`).
+     - SNN meletupkan sinyal pertahanan!
+     - 7-Segment seketika berubah menjadi: **`2 = 0 0 8 0 Z O`** (**ZEROIZED**).
+     - LED bahaya **`LED[14]` (`V12`)** dan **`LED[15]` (`V11`)** menyala! Kunci rahasia pada victim core telah dihapus (*wiped*) dan victim core dihentikan.
+
+4. **Uji Reset / Pemulihan Sistem**:
+   - Kembalikan saklar `SW[13]` ke bawah (`0`).
+   - Tekan tombol merah **`CPU_RESETN` (`C12`)**.
+   - Sistem akan me-reload konfigurasi awal dan kembali siap siaga di status **`0 = 0 0 0 0 A r`**.
 
 ---
 
