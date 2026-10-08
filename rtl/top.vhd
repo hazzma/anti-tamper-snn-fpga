@@ -297,39 +297,27 @@ begin
                     when SEQ_IDLE =>
                         seq_timer <= (others => '0');
                         if btnc_pulse = '1' then
-                            -- Manual Glitch Test (1 Press = 1 Spike Deposit!)
-                            seq_glitch_req <= '1';
-                            seq_glitch_div <= to_unsigned(20, 8); -- 50 MHz glitch
-                            seq_glitch_dur <= to_unsigned(50, 16); -- 50 us duration
-                            seq_manual_spk <= '1'; -- Generates exactly 1 spike!
+                            -- Manual Glitch Test (1 Press = +50 Water to Leaky Bucket)
+                            seq_manual_spk <= '1';
                         elsif sw15_edge = '1' or (btnd_pulse = '1' and SW(15) = '1') then
-                            -- SW[15] (V10, paling kiri): Serangan Probe (Repeat-Probe Attack, 6 bursts -> 2x Luber -> GSR)
+                            -- SW[15] (V10, paling kiri): Serangan Probe (6 bursts -> Luber 2x -> GSR)
                             seq_burst_cnt  <= 6;
                             seq_state      <= SEQ_BURST_GLITCH;
                             seq_attacking  <= '1';
-                            seq_glitch_req <= '1';
                             seq_manual_spk <= '1';
-                            seq_glitch_div <= to_unsigned(20, 8);
-                            seq_glitch_dur <= to_unsigned(50, 16);
                         elsif sw14_edge = '1' or (btnd_pulse = '1' and SW(14) = '1') then
-                            -- SW[14] (U11, ke-2 dari kiri): Serangan Ekstrem (200 MHz Overclock Glitch)
-                            seq_burst_cnt  <= 2;
+                            -- SW[14] (U11, ke-2 dari kiri): Serangan Ekstrem (6 bursts -> Luber 2x -> GSR)
+                            seq_burst_cnt  <= 6;
                             seq_state      <= SEQ_BURST_GLITCH;
                             seq_attacking  <= '1';
-                            seq_glitch_req <= '1';
                             seq_manual_spk <= '1';
-                            seq_glitch_div <= to_unsigned(5, 8); -- 200 MHz!
-                            seq_glitch_dur <= to_unsigned(50, 16);
                         elsif sw13_edge = '1' or (btnd_pulse = '1' and SW(13) = '1') then
-                            -- SW[13] (U12, ke-3 dari kiri): Serangan Gabungan (Glitch + Stressor Pemanas, 6 bursts)
+                            -- SW[13] (U12, ke-3 dari kiri): Serangan Gabungan (Stressor Pemanas + 6 bursts -> GSR)
                             seq_burst_cnt  <= 6;
                             seq_stress_en  <= '1';
                             seq_state      <= SEQ_BURST_GLITCH;
                             seq_attacking  <= '1';
-                            seq_glitch_req <= '1';
                             seq_manual_spk <= '1';
-                            seq_glitch_div <= to_unsigned(20, 8);
-                            seq_glitch_dur <= to_unsigned(50, 16);
                         elsif btnu_pulse = '1' then
                             -- BTNU (M18): Manual Sweep
                             seq_state     <= SEQ_SWEEP;
@@ -343,7 +331,6 @@ begin
                             seq_timer <= (others => '0');
                             if seq_burst_cnt > 1 then
                                 seq_burst_cnt  <= seq_burst_cnt - 1;
-                                seq_glitch_req <= '1';
                                 seq_manual_spk <= '1';
                             else
                                 seq_burst_cnt <= 0;
