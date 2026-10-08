@@ -24,8 +24,14 @@ entity victim_core is
         ack_in       : in  std_logic;
         digest_out   : out std_logic_vector(31 downto 0);
         
-        -- Status
-        zeroized_out : out std_logic
+        -- Status & Display
+        zeroized_out     : out std_logic;
+        key_disp         : out std_logic_vector(15 downto 0);
+        
+        -- Memory Integrity Injection (BTND cosmic ray & SW12 hard tamper)
+        cosmic_flip_p    : in  std_logic;
+        corrupt_inject_h : in  std_logic;
+        key_corrupt_out  : out std_logic
     );
 end entity victim_core;
 
@@ -57,9 +63,11 @@ architecture rtl of victim_core is
 
 begin
 
-    zeroized_out <= zeroized;
-    digest_out   <= digest_reg;
-    req_out      <= req_reg;
+    zeroized_out    <= zeroized;
+    digest_out      <= digest_reg;
+    req_out         <= req_reg;
+    key_disp        <= key_primary(127 downto 112);
+    key_corrupt_out <= '1' when (key_primary /= key_shadow) or corrupt_inject_h = '1' else '0';
 
     ----------------------------------------------------------------------------
     -- Key Store & Heavy Datapath Process
@@ -93,6 +101,12 @@ begin
                     key_primary <= key_in;
                     key_shadow  <= key_in;
                     zeroized    <= '0';
+                elsif corrupt_inject_h = '1' then
+                    -- Extreme Mode Memory Integrity Tamper (SW12 / H6): corrupt high word
+                    key_primary(127 downto 112) <= x"DEAD";
+                elsif cosmic_flip_p = '1' then
+                    -- Manual Cosmic Ray Single Event Upset (BTND): flip 1 bit (0123 -> 0122)
+                    key_primary(112) <= not key_primary(112);
                 end if;
 
                 -- 32-bit LFSR Update

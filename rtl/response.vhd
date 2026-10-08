@@ -108,26 +108,27 @@ begin
                     timing_active <= false;
                 end if;
 
-                -- Dual-Path Alert Evaluation (Edge-triggered incident counting):
-                -- Path 1: Instant L1 Hard Flag Rising Edge
-                -- Path 2: SNN Layer 3 Threshold Fire (Luber) Rising Edge
-                trigger_event := ((hard_alert_l1 = '1' and hard_alert_d = '0') or 
-                                 ((snn_alert_l3 = '1' and snn_alert_d = '0') and (bypass_snn = '0')));
-
-                if trigger_event then
-                    -- Record class
-                    if snn_alert_l3 = '1' and bypass_snn = '0' then
-                        class_latched <= snn_class_in;
-                    else
-                        class_latched <= "00"; -- Hard flag attributed to transient/L1
+                -- Dual-Path Alert Evaluation:
+                -- Path 1: Instant L1 Hard Flag Rising Edge (Serangan Ekstrem Fisik -> INSTANT ZEROIZE!)
+                if (hard_alert_l1 = '1' and hard_alert_d = '0') then
+                    class_latched <= "00";
+                    alert_cnt     <= esc_th; -- Langsung set counter ke 2
+                    is_alert      <= '1';
+                    if arm_en = '1' and is_zeroized = '0' then
+                        zeroize_p   <= '1';
+                        is_zeroized <= '1';
+                        if timing_active then
+                            lat_captured  <= lat_timer;
+                            timing_active <= false;
+                        end if;
                     end if;
 
-                    -- Increment escalation counter (capped at esc_th so display shows clean spike count)
+                -- Path 2: SNN Layer 3 Threshold Fire (Leaky Bucket Luber -> Eskalasi 1x Warning, 2x Zeroize)
+                elsif (snn_alert_l3 = '1' and snn_alert_d = '0') and (bypass_snn = '0') then
+                    class_latched <= snn_class_in;
                     if is_zeroized = '0' and alert_cnt < esc_th then
                         alert_cnt <= alert_cnt + 1;
                     end if;
-
-                    -- Latch alert state
                     is_alert <= '1';
 
                     -- Escalation check: count >= ESC_TH => ACTION (Zeroize key)
@@ -141,7 +142,6 @@ begin
                             end if;
                         end if;
                     end if;
-
                 end if;
 
             end if;

@@ -156,50 +156,49 @@ SNN menerima **12 Saluran Sensor (Channels)** secara simultan. Bobot bernilai in
 
 Seluruh pemetaan pin disesuaikan dengan file master XDC resmi Digilent Nexys A7-100T ([`constr/nexys_a7_100t.xdc`](constr/nexys_a7_100t.xdc)).
 
-### 1. Push Buttons (Tombol Tekan)
+### 1. Push Buttons (Tombol Tekan Manual)
 
-| Tombol | Pin FPGA | Nama Sinyal | Fungsi Utama |
-| :--- | :--- | :--- | :--- |
-| **CPU_RESETN** (Tombol Merah) | `C12` | `CPU_RESETN` | **Master Hardware Reset** (Active-Low). Mereset seluruh domain FPGA, MMCM, dan FSM ke kondisi awal. |
-| **BTNC** (Center / Tengah) | `N17` | `btnc_i` | **Manual Glitch Injection**: Memicu 1 event clock glitch instan (durasi 5 siklus) ke domain victim core. |
-| **BTNU** (Up / Atas) | `M18` | `btnu_i` | **Frequency Sweep Trigger**: Memicu sapuan frekuensi bertahap melalui MMCM DRP (overclocking/underclocking test). |
-| **BTND** (Down / Bawah) | `P18` | `btnd_i` | **Execute Scenario Preset**: Menjalankan skenario serangan otomatis yang dipilih melalui `SW[15:12]`. |
-| **BTNL** (Left / Kiri) | `P17` | `btnl_i` | **Display Page Toggle**: Mengganti mode tampilan 7-segment (Neuron Membrane Potential vs Error Counter). |
-| **BTNR** (Right / Kanan) | `M17` | `btnr_i` | **Manual Zeroize Acknowledge / Clear Alert**: Mereset status alarm kembali ke kondisi normal jika diizinkan. |
+| Tombol | Pin FPGA | Nama Sinyal | Karakteristik & Respon Sistem |
+| :--- | :---: | :--- | :--- |
+| **CPU_RESETN** (Tombol Merah) | `C12` | `CPU_RESETN` | **Master Hardware Reset** (Active-Low): Me-restore kunci AES ke `0123`, mereset membran SNN ke 0, me-reset counter ke 0, status kembali ke `0123 . C0Ar`. |
+| **BTNC** (Center / Tengah) | `N17` | `BTNC` | **Manual Soft Clock Glitch (+50 ke Leaky Bucket SNN)**:<br>• 1x Tekan: Menambah muatan $+50$ ke membran SNN ($\Theta=128$), ember tidak luber, surut sendiri dalam ~1.5 detik.<br>• 3x Tekan Cepat: Akumulasi $3 \times 50 = 150 \ge 128 \implies$ SNN Luber ke-1 $\rightarrow$ Status **Warning (`C1AL`)**, `LED[15]` ON!<br>• 6x Tekan Cepat: SNN Luber ke-2 $\rightarrow$ **GSR Zeroize (`0000 . C2ZO`)**, `LED[14]` ON, Kunci di-wipe ke `0000`! |
+| **BTND** (Down / Bawah) | `P18` | `BTND` | **Memory Integrity / Cosmic Ray Single-Event Upset (SEU)**:<br>• 1x Tekan: Membalik 1 bit pada kunci kripto (`0123` $\rightarrow$ `0122`) dan menyuntik 1 soft spike ke SNN. Dianggap sebagai radiasi cosmic ray alami tanpa memicu alarm (`0122 . C0Ar`).<br>• Spam Beruntun: SNN mendeteksi anomali bertubi-tubi (fault attack aktif), membran meluap $\rightarrow$ memicu Warning (`C1AL`) hingga GSR Zeroize (`0000 . C2ZO`)! |
+| **BTNU** (Up / Atas) | `M18` | `BTNU` | **Manual Soft Frequency Jitter**: Menyuntik pulsa jitter halus (+50 ke Leaky Bucket SNN). |
 
 ---
 
-### 2. Slide Switches (Saklar Geser - 16 Switch Fisik)
+### 2. Slide Switches (Saklar Geser - 4 Mode Ekstrem Langsung Tembus Layer 1)
 
 > [!TIP]
-> **ATURAN SEDERHANA**: Bila **SEMUA SAKLAR KE BAWAH (`0`)**, sistem **OTOMATIS 100% NORMAL & BERSENJATA (ARMED)**! Anda tidak perlu mengatur kode biner rumit untuk menjalankan operasi normal.
+> **ATURAN SEDERHANA**: Bila **SEMUA SAKLAR KE BAWAH (`0`)**, sistem **OTOMATIS NORMAL & BERSENJATA (ARMED)** dengan kunci `0123` dan status `C0Ar`!
 
-Tiga saklar paling kiri (`SW[15]`, `SW[14]`, `SW[13]`) didedikasikan secara independen sebagai pemicu serangan:
+Empat switch paling kiri (`SW[15:12]`) adalah **Mode Serangan Ekstrem** yang langsung menembus Layer 1 Hard Trip (Bypass SNN):
 
-| Saklar Fisik | Pin FPGA | Posisi Standar | Fungsi & Aksi Saat Dinaikkan |
+| Saklar Fisik | Pin FPGA | Posisi Standar | Fungsi & Aksi Saat Dinaikkan (Mode Ekstrem) |
 | :--- | :---: | :---: | :--- |
-| **`SW[15]`** *(Paling Kiri)* | `V10` | Bawah (`0`) | **Serangan Probe (Repeat-Probe)**: Menembakkan rentetan 5 glitch clock 50 MHz berturut-turut. |
-| **`SW[14]`** *(Ke-2 Kiri)* | `U11` | Bawah (`0`) | **Serangan Ekstrem (Extreme Overclock)**: Menembakkan 2 glitch clock 200 MHz ekstrem. |
-| **`SW[13]`** *(Ke-3 Kiri)* | `U12` | Bawah (`0`) | **Serangan Gabungan (Combined Attack)**: Menembakkan glitch clock + menyalakan pemanas RO on-chip penguras daya. |
-| **`SW[12]` s.d. `SW[1]`** | Beragam | Bawah (`0`) | *Reserved / Spare*. Biarkan di bawah (`0`). |
-| **`SW[0]`** *(Paling Kanan)* | `J15` | Bawah (`0`) | **Manual Disarm Switch**: `0` = Normal Bersenjata (`Ar`), `1` = Disarm/Bypass (`nr`). |
+| **`SW[15]`** *(Paling Kiri)* | `V10` | Bawah (`0`) | **Extreme Clock Glitch Trip**: Menembus Layer 1 langsung $\rightarrow$ Seketika mengunci ke `0000 . C2ZO`, `LED[14]` ON, Kunci dihapus total (<40 ns)! |
+| **`SW[14]`** *(Ke-2 Kiri)* | `U11` | Bawah (`0`) | **Extreme Voltage Drop Trip**: Menembus Layer 1 langsung $\rightarrow$ Seketika mengunci ke `0000 . C2ZO`, `LED[14]` ON! |
+| **`SW[13]`** *(Ke-3 Kiri)* | `U12` | Bawah (`0`) | **Extreme Thermal / Multi-Stress Trip**: Menyalakan stressor on-chip & menembus Layer 1 langsung $\rightarrow$ Instant Lock `0000 . C2ZO`, `LED[13]` & `LED[14]` ON! |
+| **`SW[12]`** *(Ke-4 Kiri)* | `H6` | Bawah (`0`) | **Extreme Memory Tamper Trip**: Merusak memori kunci secara paksa & menembus Layer 1 langsung $\rightarrow$ Instant Lock `0000 . C2ZO`, `LED[12]` & `LED[14]` ON! |
+| **`SW[11]` s.d. `SW[1]`** | Beragam | Bawah (`0`) | *Reserved*. Biarkan di bawah (`0`). |
+| **`SW[0]`** *(Paling Kanan)* | `J15` | Bawah (`0`) | **Monitor Disarm Switch**: `0` = Armed (Bersenjata, default), `1` = Bypass/Disarm. |
 
 ---
 
-### 📋 Cara Pengujian Super Simpel (Intuisi "Ember Luber" SNN)
-
-Konsep utama: Tombol **`N17`** menuangkan air ($+\Delta V = 50$) ke ember membran neuron berkapasitas ambang batas $\Theta = 128$. Ember memiliki lubang kebocoran (*leak decay*) bertempo ~1.5–2 detik. Spike hanya terjadi saat ember **LUBER** ($V \ge 128$)!
+### 📋 Skenario Pengujian Hardware (Board Nexys A7 Live Test)
 
 | Skenario Uji | Saklar Fisik | Tombol Eksekusi | Layar 7-Segment | Indikator LED & Efek Sistem |
 | :--- | :---: | :---: | :---: | :--- |
-| **1. Kondisi Awal (Normal Baseline)** | **Semua Saklar di BAWAH (`0`)** | *(Tidak ada)* | `S 0 0000 Ar` | Sistem aman bersenjata (*Armed*). `LED[0]` (H17) denyut 1 Hz. `LED[2]` (J13) & `LED[1]` (K15) menyala. |
-| **2. Uji 1x Klik (Surut Sendiri)** | Semua Saklar di BAWAH (`0`) | Tekan **`N17` (`BTNC`)** 1 kali | `S 0 0032 Ar` $\rightarrow$ `S 0 0000 Ar` | Tegangan naik $+50$ (hex `0032`), lalu surut perlahan dalam ~1.5 detik ke `0000`. **Tidak luber, tidak ada alarm.** |
-| **3. Spam 3x Cepat (Luber 1x $\rightarrow$ WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`N17`** 3 kali cepat | `S 1 0016 AL` | Akumulasi $50+50+50 = 150 \ge 128$ $\rightarrow$ **LUBER KE-1!** Reset subtraktif sisa `0016`. Status **WARNING (`AL`)**! `LED[15]` (**WARNING**) MENYALA! |
-| **4. Spam 3x Lagi (Luber 2x $\rightarrow$ GSR / ZEROIZE)** | Semua Saklar di BAWAH (`0`) | Spam **`N17`** 3 kali lagi | `S 2 0000 ZO` *(terbaca `20`)* | Akumulasi $22+150 = 172 \ge 128$ $\rightarrow$ **LUBER KE-2!** Ambang eskalasi tercapai $\rightarrow$ **GSR (ZEROIZE)!** `LED[14]` (**GSR / Merah**) MENYALA! Kunci kripto dimusnahkan total, memori di-wipe bersih ke `0000`! |
-| **5. Serangan Probe (V10)** | Naikkan **`V10` (`SW[15]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0000 ZO` | Rentetan 6 burst glitch membanjiri ember seketika $\rightarrow$ ember luber 2x $\rightarrow$ memicu **GSR / Zeroize** otomatis! |
-| **6. Serangan Ekstrem (U11)** | Naikkan **`U11` (`SW[14]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0000 ZO` | Overclock MMCM 200 MHz menyengat core, memicu mitigasi darurat **GSR / Zeroize**! |
-| **7. Serangan Gabungan (U12)** | Naikkan **`U12` (`SW[13]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0000 ZO` | Pemanas chip aktif + clock glitch memicu mitigasi **GSR / Zeroize**! |
-| **8. Reset Pemulihan Sistem** | Turunkan switch serangan ke bawah | Tekan **`CPU_RESETN` (`C12`)** *(Tombol Merah)* | `S 0 0000 Ar` | Alarm dibersihkan, kunci kripto di-reload, status kembali normal bersenjata. |
+| **1. Normal Armed (Boot Awal)** | Semua Saklar di BAWAH (`0`) | *(Tidak ada)* | `0123 . C0Ar` | Normal Armed. Prefix kunci `0123`, counter 0, status Armed (`Ar`). `LED[0]` denyut 1 Hz, `LED[1]` & `LED[2]` ON. |
+| **2. Cosmic Ray Test (1x BTND)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTND` (`P18`)** 1 kali | `0122 . C0Ar` | Bit kunci terbalik (`0123` $\rightarrow$ `0122`). SNN menganggap anomali kecil alami (surut sendiri). **Tidak ada alarm.** |
+| **3. Soft Glitch 1x (BTNC)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTNC` (`N17`)** 1 kali | `0123 . C0Ar` | Membran SNN naik $+50$, tidak luber ($\Theta=128$), surut perlahan ke 0 dalam ~1.5 detik. **Aman.** |
+| **4. Spam 3x BTNC/BTND (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`BTNC` / `BTND`** 3 kali cepat | `0123 . C1AL` | Membran meluap ($150 \ge 128$) $\rightarrow$ Counter naik ke 1! Status **WARNING (`AL`)**! `LED[15]` MENYALA! |
+| **5. Spam Lanjutan (GSR ZEROIZE)** | Semua Saklar di BAWAH (`0`) | Spam 3 kali lagi | `0000 . C2ZO` | Counter naik ke 2 ($\ge$ Ambang Eskalasi) $\rightarrow$ **GSR ZEROIZE!** Kunci dihapus total menjadi `0000`. `LED[14]` (Bahaya) MENYALA! |
+| **6. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . C2ZO` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap menjadi `0000`, terkunci di status `C2ZO`. |
+| **7. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . C2ZO` | Layer 1 Hard Trip instan! Terkunci di status `0000 . C2ZO`. |
+| **8. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . C2ZO` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap, terkunci di status `0000 . C2ZO`. |
+| **9. Extreme Memory Tamper (H6)** | Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . C2ZO` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total, terkunci di status `0000 . C2ZO`. |
+| **10. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . C0Ar` | Kunci dipulihkan kembali ke `0123`, counter di-reset ke 0, status kembali normal bersenjata (`C0Ar`). |
 
 ---
 
@@ -210,32 +209,30 @@ Konsep utama: Tombol **`N17`** menuangkan air ($+\Delta V = 50$) ke ember membra
 | **LED[0]** | `H17` | `heartbeat_led` | **1 Hz Heartbeat `clk100`**: Berkedip 1 Hz menandakan FPGA & osilator hidup normal. |
 | **LED[1]** | `K15` | `mmcm_locked` | **MMCM Locked**: Menyala jika clock 25 MHz valid dan terkunci. |
 | **LED[2]** | `J13` | `arm_active` | **Armed Indicator**: Menyala menandakan sistem bersenjata aktif (default ON saat semua switch 0). |
-| **LED[11]**| `T16` | `glitch_act` | **Glitch In-Flight**: Menyala sesaat selama MMCM sedang disuntik glitch. |
-| **LED[12]**| `V15` | `seq_attacking`| **Attack Active**: Menyala selama rangkaian burst serangan sedang dieksekusi. |
-| **LED[13]**| `V14` | `stress_en` | **Stressor Active**: Menyala saat pemanas on-chip penguras daya aktif. |
-| **LED[14]**| `V12` | `is_zeroized` | 🔴 **GSR / ZEROIZED ACTIVE (Bahaya)**: Menyala terkunci jika terjadi $\ge 2$ spike (kunci kripto dimusnahkan total)! |
-| **LED[15]**| `V11` | `is_alert` | 🟡 **WARNING ACTIVE**: Menyala khusus saat terjadi 1 spike (peringatan dini / Alert). |
+| **LED[12]**| `V15` | `SW[12]` | **Extreme Memory Tamper Switch (H6)**: Menyala saat switch H6 aktif. |
+| **LED[13]**| `V14` | `SW[13]` | **Extreme Thermal Switch (U12)**: Menyala saat switch U12 aktif (stressor on-chip menyala). |
+| **LED[14]**| `V12` | `is_zeroized` | 🔴 **GSR / ZEROIZED ACTIVE (Bahaya)**: Menyala terkunci jika terjadi mitigasi darurat / switch ekstrem (Kunci dimusnahkan total)! |
+| **LED[15]**| `V11` | `is_alert` | 🟡 **WARNING ACTIVE**: Menyala khusus saat terjadi 1 spike (peringatan dini / Alert sebelum eskalasi zeroize). |
 
 ---
 
-### 📟 Tampilan 7-Segment Display (8 Digit)
+### 📟 Tampilan 7-Segment Display (Split 8 Digit)
 
-Display 8 digit 7-segment pada Nexys A7 langsung mengabarkan jumlah spike dan status sistem secara real-time:
+Display 8 digit 7-segment pada Nexys A7 dibagi menjadi 2 zona yang dipisahkan oleh Decimal Point (`DP`):
 
 ```text
- +-------+-------+   +-------+-------+-------+-------+   +-------+-------+
- |  AN7  |  AN6  |   |  AN5  |  AN4  |  AN3  |  AN2  |   |  AN1  |  AN0  |
- |  [S]  | SPIKE |   |   [ MEMBRANE POTENTIAL / WIPED ]  |   [ STATUS ]  |
- | LABEL | COUNT |   |   (HEX: 0000..0080 atau 0000 GSR) | (Ar / AL / ZO)|
- +-------+-------+   +-------+-------+-------+-------+   +-------+-------+
+ +-------+-------+-------+-------+       +-------+-------+-------+-------+
+ |  AN7  |  AN6  |  AN5  |  AN4  |   .   |  AN3  |  AN2  |  AN1  |  AN0  |
+ |        KEY DISPLAY (4 DIGIT)   |   DP  |      COUNTER & STATUS (4 DIGIT)|
+ |  [0123] Normal / [0000] Wiped | [ON]  |  [C]  | COUNT | [Ar / AL / ZO] |
+ +-------+-------+-------+-------+       +-------+-------+-------+-------+
 ```
 
-| Posisi Digit | Tampilan | Arti & Maknanya |
-| :--- | :---: | :--- |
-| **Digit 7** *(Paling Kiri)* | **`S`** | Indikator **Spike Detector** subsistem SNN. |
-| **Digit 6** | **`0`, `1`, `2`, `3`..** | **Spike Counter**: Menunjukkan secara live **sudah berapa kali spike terjadi**! |
-| **Digit 5 - 2** *(4 Digit Tengah)* | **`0000` s.d. `0080`** | **Tegangan Membran / Indikator Data Terhapus**:<br>• Kondisi Normal: Menampilkan tegangan membran live $V$ dalam format Hexadecimal.<br>• **Kondisi GSR / Zeroize**: Menampilkan **`0000`** menandakan **seluruh data rahasia & kunci kripto telah dibersihkan/dihapus total!** |
-| **Digit 1 - 0** *(2 Digit Paling Kanan)* | **`Ar`, `AL`, `ZO`** | **Status Keamanan FSM**:<br>• **`Ar`** : **ARMED** (Kondisi normal bersenjata, Spike = 0)<br>• **`AL`** : **WARNING** (Peringatan anomali! Spike = 1)<br>• **`ZO`** : **GSR / ZEROIZED** (Global Security Reset! Spike $\ge$ 2, kunci kripto musnah!) |
+| Zona Display | Digit | Tampilan | Arti & Maknanya |
+| :--- | :---: | :---: | :--- |
+| **Zona Kiri (Kunci AES)** | **`AN[7:4]`** | **`0123`** atau **`0000`** | **Prefix Kunci Kriptografi AES**:<br>• Normal: Menampilkan hex **`0123`**.<br>• Cosmic Ray (1x BTND): Menampilkan **`0122`** (1 bit terbalik).<br>• **GSR / Zeroize**: Menampilkan **`0000`** (kunci terhapus bersih dari hardware)! |
+| **Pemisah Desimal** | **`DP` (Digit 4)** | **`.` (Menyala)** | **Decimal Point** aktif di digit 4 sebagai pemisah visual antara Kunci dan Counter. |
+| **Zona Kanan (Counter & Status)** | **`AN[3:0]`** | **`C 0 Ar`** / **`C 1 AL`** / **`C 2 ZO`** | **Format: `C <count> <Status>`**:<br>• **`C0Ar`**: Count 0, Status **Armed** (Normal)<br>• **`C1AL`**: Count 1, Status **Alert / Warning** (SNN Mendeteksi Anomali)<br>• **`C2ZO`**: Count 2, Status **GSR Zeroize** (Kunci Musnah & Sistem Terkunci)! |
 
 ---
 
@@ -332,92 +329,66 @@ vivado -mode batch -source scripts/sim.tcl
 
 ---
 
-### Pengujian 3: Smoke Test Hardware via Interactive CLI
+### Pengujian 3: Pemrograman Bitstream ke Board Nexys A7-100T
 
-Setelah memprogram bitstream ke board Nexys A7 melalui **Vivado Hardware Manager**:
+Bitstream siap pakai berlokasi di:
+- `vivado_output_snn/anti_tamper_snn.bit`
+- `vivado_project/anti_tamper_snn.runs/impl_1/top.bit`
 
-1. Pastikan kabel Micro-USB terpasang ke port **PROG / UART** (J6) Nexys A7 dan port USB PC.
-2. Buka Device Manager di Windows untuk melihat port COM (misal: `COM5`).
-3. Buka PowerShell dan arahkan ke root repositori, jalankan:
-   ```powershell
-   python sw/host/attack_cli.py --port COM5 --baud 115200
-   ```
-4. Anda akan masuk ke prompt interaktif `SNN-GUARD>`.
-5. Coba jalankan perintah berikut secara berurutan:
+Cara memprogram melalui Vivado Hardware Manager:
+1. Hubungkan kabel Micro-USB ke port **PROG / UART** (J6) Nexys A7-100T dan nyalakan saklar daya (POWER switch).
+2. Di Vivado, buka **Hardware Manager** $\rightarrow$ **Open Target** $\rightarrow$ **Auto Connect**.
+3. Klik kanan pada target FPGA `xc7a100t_0` $\rightarrow$ pilih **Program Device...**.
+4. Pilih file bitstream: `vivado_output_snn/anti_tamper_snn.bit`.
+5. Klik **Program**. LED DONE akan menyala hijau, dan display 7-segment langsung menampilkan:
    ```text
-   SNN-GUARD> STATUS
-   SNN-GUARD> ARM
-   SNN-GUARD> G 1000 5
-   SNN-GUARD> STATUS
-   SNN-GUARD> STRESS 1
-   SNN-GUARD> ZEROIZE
+   0123 . C0Ar
    ```
-   *Amati respons JSON/teks dari UART serta perubahan pada 7-segment dan LED board.*
 
 ---
 
-### Pengujian 4: Benchmark Otomatis (Experiment Suite)
+### Pengujian 4: Pengujian Interaktif On-Board (Live Physical Test)
 
-Skrip ini akan menguji seluruh skenario (SCEN0 s.d. SCEN4) secara otomatis, menghitung Time-to-Detect (TTD), False Positive Rate (FPR), dan Detection Rate (DR), serta mencatatnya ke dalam file CSV.
+Sistem beroperasi secara **100% Standalone Hardware** (seluruh fungsi dijalankan langsung melalui tombol, saklar, dan indikator board):
 
-Jalankan perintah:
-```powershell
-python sw/host/run_experiments.py --port COM5 --baud 115200 --output results/
-```
-Hasil pengujian dapat ditemukan di folder `results/exp_*.csv`.
+1. **Kondisi Awal (Armed Baseline)**:
+   - Pastikan seluruh saklar `SW[15:0]` berada di posisi **BAWAH (`0`)**.
+   - Tekan tombol merah `CPU_RESETN` (`C12`).
+   - Layar 7-Segment menampilkan: **`0123 . C0Ar`** (Kunci `0123`, Counter 0, Status Armed `Ar`).
+   - `LED[0]` (H17) berkedip 1 Hz, `LED[1]` (K15) dan `LED[2]` (J13) menyala.
 
----
+2. **Uji Bit-Flip Cosmic Ray SEU (1x Tekan `BTND` / `P18`)**:
+   - Tekan tombol bawah **`BTND` (`P18`)** 1 kali.
+   - Layar 7-Segment berubah menjadi: **`0122 . C0Ar`**.
+   - Terlihat bit 112 kunci kripto terbalik (`3` -> `2`), dan muatan +50 masuk ke SNN.
+   - Karena muatan +50 < Theta (128), SNN menganggapnya sebagai fluktuasi/cosmic ray alami dan muatan surut ke 0. **Tidak memicu alarm!**
 
-### Pengujian 5: Pengujian Mandiri Hardware Tanpa PC (On-Board Live Test)
+3. **Uji Transient Soft Glitch (1x Tekan `BTNC` / `N17`)**:
+   - Tekan tombol tengah **`BTNC` (`N17`)** 1 kali.
+   - Muatan +50 masuk ke SNN. Karena tidak melampaui Theta=128, muatan surut dalam ~1.5 detik. **Sistem tetap aman.**
 
-Anda dapat menguji seluruh fungsi sistem secara mandiri langsung di board Nexys A7:
+4. **Uji Serangan Berulang (Spam `BTNC` atau `BTND` 3x -> WARNING)**:
+   - Tekan cepat **`BTNC`** atau **`BTND`** sebanyak 3 kali berturut-turut.
+   - Akumulasi 3 x 50 = 150 >= 128 -> SNN ember luber ke-1!
+   - Layar 7-Segment berubah menjadi: **`0123 . C1AL`** (atau `0122 . C1AL`).
+   - Counter naik ke **1**, status berubah menjadi **`AL` (Alert / Warning)**, dan **`LED[15]` MENYALA**!
 
-1. **Inisialisasi & Kondisi Awal (Armed Baseline)**:
-   - Naikkan saklar **`SW[0]` (`J15`)** dan **`SW[1]` (`L16`)** ke atas (`1 1` di paling kanan).
-   - Pastikan seluruh saklar lainnya (`SW[15..2]`) dalam posisi **BAWAH** (`0`).
-   - Tekan tombol merah `CPU_RESETN` (`C12`) sesaat untuk reset awal.
-   - **Tampilan Board**:
-     - `LED[0]` (`H17`) berkedip 1 Hz (denyut jantung clock).
-     - `LED[1]` (`K15`) dan `LED[2]` (`J13`) menyala hijau (MMCM locked & Armed).
-     - 7-Segment menampilkan: **`0 = 0 0 0 0 A r`** *(Class 0, V=0000, ARMED)*.
+5. **Uji Eskalasi Pertahanan (Spam 3x Lagi -> GSR ZEROIZE)**:
+   - Tekan cepat 3 kali lagi.
+   - SNN luber ke-2 -> ambang eskalasi tercapai -> **GSR ZEROIZE**!
+   - Layar 7-Segment seketika berubah menjadi: **`0000 . C2ZO`**!
+   - Seluruh kunci rahasia dimusnahkan total (`0000`), proses dihentikan, dan LED bahaya **`LED[14]` MENYALA MERAH**!
 
-2. **Uji Serangan Glitch Tunggal (Transient Filter Imunitas SNN)**:
-   - Tekan tombol tengah **`BTNC` (`N17`)** satu kali.
-   - **Pengamatan**:
-     - MMCM menyuntikkan 1 pulsa clock 50 MHz (50 $\mu$s).
-     - Tegangan membran melonjak sesaat di digit 5..2 (misal `0021`) berkat fitur peak-hold 250 ms, kemudian bocor (*leaked*) kembali ke `0000`.
-     - Status tetap **`Ar`** (tidak zeroize). Ini membuktikan SNN berhasil memfilter gangguan sesaat agar tidak memicu alarm palsu.
+6. **Uji 4 Saklar Mode Ekstrem (Bypass SNN -> Tembus Layer 1 Instan)**:
+   - **`SW[15]` (`V10`)**: Naikkan -> Langsung loncat ke **`0000 . C2ZO`** (Extreme Clock Trip)!
+   - **`SW[14]` (`U11`)**: Naikkan -> Langsung loncat ke **`0000 . C2ZO`** (Extreme Voltage Trip)!
+   - **`SW[13]` (`U12`)**: Naikkan -> Langsung loncat ke **`0000 . C2ZO`** & `LED[13]` ON (Extreme Thermal Trip)!
+   - **`SW[12]` (`H6`)**: Naikkan -> Kunci dirusak & langsung loncat ke **`0000 . C2ZO`** & `LED[12]` ON (Extreme Memory Integrity Trip)!
 
-3. **Uji Repeat-Probe Attack $\rightarrow$ ZEROIZE (Skenario 2)**:
-   - Naikkan saklar **`SW[13]` (`U12`)** ke atas. Konfigurasi 4 switch paling kiri menjadi: **`0 0 1 0`**.
-   - Tekan tombol bawah **`P18` (`BTND`)**.
-   - **Pengamatan Hardware**:
-     - Rangkaian hardware sequencer menembakkan rentetan 5 glitch 50 MHz berturut-turut.
-     - Potensial membran $N_1$ terakumulasi melampaui $\Theta \ge 128$ (`0080`).
-     - SNN meletupkan sinyal pertahanan!
-     - 7-Segment seketika berubah menjadi: **`2 = 0 0 8 0 Z O`** (**ZEROIZED**).
-     - LED bahaya **`LED[14]` (`V12`)** dan **`LED[15]` (`V11`)** menyala! Kunci rahasia pada victim core telah dihapus (*wiped*) dan victim core dihentikan.
-
-4. **Uji Reset / Pemulihan Sistem**:
-   - Kembalikan saklar `SW[13]` ke bawah (`0`).
+7. **Uji Pemulihan Sistem (Master Reset)**:
+   - Turunkan seluruh saklar ekstrem ke bawah (`0`).
    - Tekan tombol merah **`CPU_RESETN` (`C12`)**.
-   - Sistem akan me-reload konfigurasi awal dan kembali siap siaga di status **`0 = 0 0 0 0 A r`**.
-
----
-
-## 📡 Protokol Komunikasi UART & Perintah CLI
-
-UART beroperasi pada baud rate **115200 bps, 8 Data bits, No Parity, 1 Stop bit (8-N-1)**.
-
-| Perintah | Argumen | Contoh | Deskripsi |
-| :--- | :--- | :--- | :--- |
-| `STATUS` | - | `STATUS` | Membaca status lengkap register: FSM state, frekuensi core, voltage count, nilai membrane potential, dan attack flag. |
-| `G` | `<period> <width>` | `G 1000 5` | Menembakkan glitch pulsa clock dengan interval `<period>` siklus dan lebar pulsa `<width>`. |
-| `SWEEP` | `<start> <step> <count>` | `SWEEP 25 1 10` | Menjalankan dynamic frequency sweep dari nominal 25 MHz melalui MMCM DRP. |
-| `STRESS` | `<level>` | `STRESS 3` | Menyalakan beban ring oscillator (Level 0: Off, Level 1..3: Menguras daya internal). |
-| `ARM` | - | `ARM` | Mengubah state sistem menjadi ARMED (siaga tinggi). |
-| `DISARM` | - | `DISARM` | Mengembalikan status ke NORMAL. |
-| `ZEROIZE` | - | `ZEROIZE` | Memicu zeroization manual (emergency wipe). |
+   - Sistem seketika kembali ke kondisi normal bersenjata: **`0123 . C0Ar`**.
 
 ---
 

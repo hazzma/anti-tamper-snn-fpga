@@ -27,6 +27,7 @@ entity telemetry is
         active_class   : in  std_logic_vector(1 downto 0);
         v_n1_membrane  : in  signed(15 downto 0);
         spike_count    : in  unsigned(7 downto 0);
+        key_display    : in  std_logic_vector(15 downto 0);
         
         -- 7-Segment Display Outputs (Nexys A7-100T)
         seg_an         : out std_logic_vector(7 downto 0);
@@ -84,7 +85,8 @@ begin
     heartbeat_led <= hb_reg;
     seg_an        <= an_reg;
     seg_cath      <= cath_reg;
-    seg_dp        <= '1'; -- Decimal point off
+    -- Decimal point aktif (low) pada Digit 4 sebagai pembatas visual antara Key (kiri) dan Counter/Status (kanan)
+    seg_dp        <= '0' when digit_idx = 4 else '1';
 
     ----------------------------------------------------------------------------
     -- Timer & Leak Tick Generator Process
@@ -144,7 +146,7 @@ begin
     end process p_v_hold;
 
     ----------------------------------------------------------------------------
-    -- 7-Segment 8-Digit Display Scanner (FSD v2 §10)
+    -- 7-Segment 8-Digit Display Scanner (Split: 4 Digit Kiri = Key, 4 Digit Kanan = Counter)
     ----------------------------------------------------------------------------
     p_7seg : process(clk100)
     begin
@@ -171,39 +173,40 @@ begin
                 an_reg(digit_idx) <= '0';
 
                 -- Display content mapping:
-                -- Digit 7   => 'S' (Spike indicator)
-                -- Digit 6   => Spike Count (0, 1, 2, ...)
-                -- Digit 5:2 => Live V[n1] (or "0000" if ZEROIZED / wiped)
-                -- Digit 1:0 => State (Ar = Armed, AL = Warning, ZO = GSR/Zeroized)
+                -- Digit 7:4 (KIRI)  => 16-bit Key Display (wiped to 0000 on zeroize)
+                -- Digit 3:0 (KANAN) => C <spike_count> <State> (misal C0Ar, C1AL, C2ZO)
                 case digit_idx is
+                    -- === 4 DIGIT KIRI (DATA KUNCI KRIPTOGRAFI) ===
                     when 7 =>
-                        cath_reg <= "0010010"; -- 'S'
+                        if zeroize_status = '1' then
+                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
+                        else
+                            cath_reg <= hex_to_7seg(key_display(15 downto 12));
+                        end if;
                     when 6 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(spike_count(3 downto 0)));
+                        if zeroize_status = '1' then
+                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
+                        else
+                            cath_reg <= hex_to_7seg(key_display(11 downto 8));
+                        end if;
                     when 5 =>
                         if zeroize_status = '1' then
                             cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
                         else
-                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(15 downto 12)));
+                            cath_reg <= hex_to_7seg(key_display(7 downto 4));
                         end if;
                     when 4 =>
                         if zeroize_status = '1' then
                             cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
                         else
-                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(11 downto 8)));
+                            cath_reg <= hex_to_7seg(key_display(3 downto 0));
                         end if;
+
+                    -- === 4 DIGIT KANAN (COUNTER & STATUS SNN) ===
                     when 3 =>
-                        if zeroize_status = '1' then
-                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
-                        else
-                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(7 downto 4)));
-                        end if;
+                        cath_reg <= "1000110"; -- 'C' (Counter indicator)
                     when 2 =>
-                        if zeroize_status = '1' then
-                            cath_reg <= hex_to_7seg(x"0"); -- 0 (wiped)
-                        else
-                            cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(3 downto 0)));
-                        end if;
+                        cath_reg <= hex_to_7seg(std_logic_vector(spike_count(3 downto 0)));
                     when 1 =>
                         if zeroize_status = '1' then
                             cath_reg <= "0100100"; -- 'Z' (GSR / Zeroized)

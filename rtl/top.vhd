@@ -60,28 +60,20 @@ architecture rtl of top is
     signal drp_busy       : std_logic;
     signal glitch_act     : std_logic;
 
-    -- UART & Parser Signals
-    signal rx_byte        : std_logic_vector(7 downto 0);
-    signal rx_valid       : std_logic;
-    signal tx_byte        : std_logic_vector(7 downto 0);
-    signal tx_valid       : std_logic;
-    signal tx_ready       : std_logic;
-
-    -- Control Registers
-    signal sensor_mode_cfg: std_logic_vector(1 downto 0);
-    signal arm_cfg        : std_logic;
-    signal bypass_cfg     : std_logic;
-    signal esc_th_cfg     : unsigned(7 downto 0);
-    signal unlock_p       : std_logic;
-    signal key_load_en    : std_logic;
-    signal key_data       : std_logic_vector(127 downto 0);
-    signal manual_wipe    : std_logic;
-    signal glitch_req     : std_logic;
-    signal glitch_div     : unsigned(7 downto 0);
-    signal glitch_dur_us  : unsigned(15 downto 0);
-    signal stress_en      : std_logic;
-    signal attack_active  : std_logic;
-    signal log_mode       : std_logic_vector(1 downto 0);
+    -- Control Configuration Signals (Hardware-Only Standalone Mode)
+    signal sensor_mode_cfg: std_logic_vector(1 downto 0) := SENSOR_MODE_C;
+    signal arm_cfg        : std_logic := '1';
+    signal bypass_cfg     : std_logic := '0';
+    signal esc_th_cfg     : unsigned(7 downto 0) := to_unsigned(2, 8);
+    signal unlock_p       : std_logic := '0';
+    signal key_load_en    : std_logic := '0';
+    signal key_data       : std_logic_vector(127 downto 0) := (others => '0');
+    signal manual_wipe    : std_logic := '0';
+    signal glitch_req     : std_logic := '0';
+    signal glitch_div     : unsigned(7 downto 0) := to_unsigned(40, 8);
+    signal glitch_dur_us  : unsigned(15 downto 0) := to_unsigned(50, 16);
+    signal stress_en      : std_logic := '0';
+    signal attack_active  : std_logic := '0';
 
     -- Hardware Monitor Flags & Spikes
     signal clk_gross_h    : std_logic;
@@ -104,10 +96,19 @@ architecture rtl of top is
     signal v_zeroized     : std_logic;
     signal key_corrupt_h  : std_logic;
     signal xfer_err_event : std_logic;
+    
+    -- Memory Integrity & Display Signals
+    signal key_disp_val   : std_logic_vector(15 downto 0);
+    signal key_corrupt_core : std_logic;
+    signal cosmic_toggle  : std_logic := '0';
+    signal c_tog_sync1    : std_logic := '0';
+    signal c_tog_sync2    : std_logic := '0';
+    signal c_tog_sync3    : std_logic := '0';
+    signal cosmic_flip_core : std_logic := '0';
 
     -- Synthetic Spikes
-    signal synth_spikes   : std_logic_vector(11 downto 0);
-    signal synth_q        : q_array_t;
+    signal synth_spikes   : std_logic_vector(11 downto 0) := (others => '0');
+    signal synth_q        : q_array_t := (others => (others => '0'));
 
     -- Muxed Spikes to SNN
     signal spikes_active  : std_logic_vector(11 downto 0);
@@ -138,33 +139,13 @@ architecture rtl of top is
     signal btnu_pulse         : std_logic := '0';
     signal btnd_pulse         : std_logic := '0';
 
-    -- Physical Hardware Attack Sequencer (triggered by BTNC, BTNU, or BTND + SW(15 downto 12))
-    type hw_seq_state_t is (SEQ_IDLE, SEQ_BURST_GLITCH, SEQ_SWEEP);
-    signal seq_state          : hw_seq_state_t := SEQ_IDLE;
-    signal seq_burst_cnt      : integer range 0 to 10 := 0;
-    signal seq_timer          : unsigned(23 downto 0) := (others => '0');
-    signal seq_glitch_req     : std_logic := '0';
-    signal seq_glitch_div     : unsigned(7 downto 0) := to_unsigned(20, 8);
-    signal seq_glitch_dur     : unsigned(15 downto 0) := to_unsigned(50, 16);
-    signal seq_stress_en      : std_logic := '0';
-    signal seq_attacking      : std_logic := '0';
-    signal seq_div_req        : std_logic := '0';
-    signal seq_div_val        : unsigned(7 downto 0) := to_unsigned(40, 8);
-
-    -- Switch Edge Detectors & Manual Pulse
-    signal sw15_d, sw14_d, sw13_d : std_logic := '0';
-    signal sw15_edge, sw14_edge, sw13_edge : std_logic := '0';
+    -- Switch Edge Detectors & Extreme Trips (SW15, SW14, SW13, SW12)
+    signal sw15_d, sw14_d, sw13_d, sw12_d : std_logic := '0';
+    signal sw15_edge, sw14_edge, sw13_edge, sw12_edge : std_logic := '0';
+    signal sw15_trip, sw14_trip, sw13_trip, sw12_trip : std_logic := '0';
+    signal sw_extreme_trip    : std_logic := '0';
     signal seq_manual_spk     : std_logic := '0';
     signal arm_active         : std_logic := '1';
-
-    -- Combined Control Signals (Physical Hardware + UART Parser)
-    signal total_glitch_req   : std_logic;
-    signal total_glitch_div   : unsigned(7 downto 0);
-    signal total_glitch_dur   : unsigned(15 downto 0);
-    signal total_stress_en    : std_logic;
-    signal total_attack_act   : std_logic;
-    signal total_div_req      : std_logic;
-    signal total_div_val      : unsigned(7 downto 0);
 
     -- Switch-gated Monitor Flags (SW(0) = Monitor Bypass / Disarm)
     signal g_clk_fast_h       : std_logic;
@@ -204,11 +185,29 @@ begin
     end process p_rst_core_sync;
     rstn_core <= rstn_c_sync2;
 
-    -- Combined zeroize pulse (from response escalation OR manual UART wipe)
+    -- Combined zeroize pulse (from response escalation OR manual wipe)
     total_zeroize <= zeroize_pulse or manual_wipe;
 
     -- Active Security Armed State: Armed by default when all switches are DOWN (0)
     arm_active <= arm_cfg and (not SW(0));
+
+    -- CDC Synchronizer for Cosmic Ray Memory Toggle from clk100 to clk_core
+    p_cosmic_sync : process(clk_core)
+    begin
+        if rising_edge(clk_core) then
+            if rstn_core = '0' then
+                c_tog_sync1      <= '0';
+                c_tog_sync2      <= '0';
+                c_tog_sync3      <= '0';
+                cosmic_flip_core <= '0';
+            else
+                c_tog_sync1      <= cosmic_toggle;
+                c_tog_sync2      <= c_tog_sync1;
+                c_tog_sync3      <= c_tog_sync2;
+                cosmic_flip_core <= c_tog_sync2 xor c_tog_sync3;
+            end if;
+        end if;
+    end process p_cosmic_sync;
 
     -- Monitor flags (Active by default, manual pulse from N17 injected directly to SNN Leaky Bucket)
     g_clk_fast_h    <= clk_fast_h and (not SW(0));
@@ -224,21 +223,24 @@ begin
     g_v_soft_spk    <= v_soft_spk and (not SW(0));
     g_v_soft_q      <= v_soft_q when SW(0) = '0' else (others => '0');
 
-    -- OR-reduction of genuine Layer 1 Hard Flags (severe clock faults & MMCM unlock)
-    hard_alert_or <= g_clk_fast_h or g_clk_stop_h or g_mmcm_unlock_h or
+    -- Extreme Switch Trip Generation:
+    -- SW15 (V10): Extreme Clock Fault
+    -- SW14 (U11): Extreme Voltage Fault
+    -- SW13 (U12): Extreme Thermal / Multi-Stress Fault
+    -- SW12 (H6):  Extreme Memory Integrity Fault
+    sw15_trip <= sw15_edge or (SW(15) and not sw15_d);
+    sw14_trip <= sw14_edge or (SW(14) and not sw14_d);
+    sw13_trip <= sw13_edge or (SW(13) and not sw13_d);
+    sw12_trip <= sw12_edge or (SW(12) and not sw12_d);
+
+    sw_extreme_trip <= sw15_trip or sw14_trip or sw13_trip or sw12_trip;
+
+    -- OR-reduction of Layer 1 Hard Flags (Extreme Switches directly trip Layer 1!)
+    hard_alert_or <= sw_extreme_trip or g_clk_fast_h or g_clk_stop_h or g_mmcm_unlock_h or
                      (g_v_under_h and sensor_mode_cfg(0)) or (g_v_over_h and sensor_mode_cfg(0));
 
-    -- Hardware Controls
-    total_glitch_req <= glitch_req or seq_glitch_req;
-    total_glitch_div <= seq_glitch_div when (seq_glitch_req = '1' or seq_attacking = '1') else glitch_div;
-    total_glitch_dur <= seq_glitch_dur when (seq_glitch_req = '1' or seq_attacking = '1') else glitch_dur_us;
-    total_stress_en  <= stress_en or SW(2) or seq_stress_en;
-    total_attack_act <= attack_active or seq_attacking;
-    total_div_req    <= seq_div_req;
-    total_div_val    <= seq_div_val;
-
     ----------------------------------------------------------------------------
-    -- Physical Button Debounce & Hardware Attack Sequencer
+    -- Physical Button Debounce & Manual Attack Event Generation
     ----------------------------------------------------------------------------
     p_hw_seq : process(clk100)
     begin
@@ -256,20 +258,13 @@ begin
                 sw15_d         <= SW(15);
                 sw14_d         <= SW(14);
                 sw13_d         <= SW(13);
+                sw12_d         <= SW(12);
                 sw15_edge      <= '0';
                 sw14_edge      <= '0';
                 sw13_edge      <= '0';
+                sw12_edge      <= '0';
                 seq_manual_spk <= '0';
-                seq_state      <= SEQ_IDLE;
-                seq_burst_cnt  <= 0;
-                seq_timer      <= (others => '0');
-                seq_glitch_req <= '0';
-                seq_glitch_div <= to_unsigned(20, 8);
-                seq_glitch_dur <= to_unsigned(50, 16);
-                seq_stress_en  <= '0';
-                seq_attacking  <= '0';
-                seq_div_req    <= '0';
-                seq_div_val    <= to_unsigned(40, 8);
+                cosmic_toggle  <= '0';
             else
                 btnc_d1    <= BTNC; btnc_d2 <= btnc_d1;
                 btnc_pulse <= btnc_d1 and not btnc_d2;
@@ -289,72 +284,19 @@ begin
                 sw13_d    <= SW(13);
                 sw13_edge <= SW(13) and not sw13_d;
 
-                seq_glitch_req <= '0';
-                seq_div_req    <= '0';
-                seq_manual_spk <= '0';
+                sw12_d    <= SW(12);
+                sw12_edge <= SW(12) and not sw12_d;
 
-                case seq_state is
-                    when SEQ_IDLE =>
-                        seq_timer <= (others => '0');
-                        if btnc_pulse = '1' then
-                            -- Manual Glitch Test (1 Press = +50 Water to Leaky Bucket)
-                            seq_manual_spk <= '1';
-                        elsif sw15_edge = '1' or (btnd_pulse = '1' and SW(15) = '1') then
-                            -- SW[15] (V10, paling kiri): Serangan Probe (6 bursts -> Luber 2x -> GSR)
-                            seq_burst_cnt  <= 6;
-                            seq_state      <= SEQ_BURST_GLITCH;
-                            seq_attacking  <= '1';
-                            seq_manual_spk <= '1';
-                        elsif sw14_edge = '1' or (btnd_pulse = '1' and SW(14) = '1') then
-                            -- SW[14] (U11, ke-2 dari kiri): Serangan Ekstrem (6 bursts -> Luber 2x -> GSR)
-                            seq_burst_cnt  <= 6;
-                            seq_state      <= SEQ_BURST_GLITCH;
-                            seq_attacking  <= '1';
-                            seq_manual_spk <= '1';
-                        elsif sw13_edge = '1' or (btnd_pulse = '1' and SW(13) = '1') then
-                            -- SW[13] (U12, ke-3 dari kiri): Serangan Gabungan (Stressor Pemanas + 6 bursts -> GSR)
-                            seq_burst_cnt  <= 6;
-                            seq_stress_en  <= '1';
-                            seq_state      <= SEQ_BURST_GLITCH;
-                            seq_attacking  <= '1';
-                            seq_manual_spk <= '1';
-                        elsif btnu_pulse = '1' then
-                            -- BTNU (M18): Manual Sweep
-                            seq_state     <= SEQ_SWEEP;
-                            seq_attacking <= '1';
-                            seq_div_val   <= to_unsigned(40, 8);
-                        end if;
+                -- Memory bit-flip toggle on BTND (Cosmic Ray SEU)
+                if btnd_pulse = '1' then
+                    cosmic_toggle <= not cosmic_toggle;
+                end if;
 
-                    when SEQ_BURST_GLITCH =>
-                        seq_timer <= seq_timer + 1;
-                        if seq_timer >= 100000 then -- 1 ms between glitch pulses
-                            seq_timer <= (others => '0');
-                            if seq_burst_cnt > 1 then
-                                seq_burst_cnt  <= seq_burst_cnt - 1;
-                                seq_manual_spk <= '1';
-                            else
-                                seq_burst_cnt <= 0;
-                                seq_stress_en <= '0';
-                                seq_attacking <= '0';
-                                seq_state     <= SEQ_IDLE;
-                            end if;
-                        end if;
-
-                    when SEQ_SWEEP =>
-                        seq_timer <= seq_timer + 1;
-                        if seq_timer >= 500000 then -- 5 ms per step
-                            seq_timer <= (others => '0');
-                            if seq_div_val > 24 then
-                                seq_div_val <= seq_div_val - 2;
-                                seq_div_req <= '1';
-                            else
-                                seq_div_val   <= to_unsigned(40, 8);
-                                seq_div_req   <= '1';
-                                seq_attacking <= '0';
-                                seq_state     <= SEQ_IDLE;
-                            end if;
-                        end if;
-                end case;
+                -- Manual soft pulse into SNN Leaky Bucket (+50 water per click):
+                -- BTNC: Soft Clock Glitch
+                -- BTND: Cosmic Ray SEU
+                -- BTNU: Soft Frequency Jitter
+                seq_manual_spk <= btnc_pulse or btnd_pulse or btnu_pulse;
             end if;
         end if;
     end process p_hw_seq;
@@ -378,7 +320,7 @@ begin
         );
 
     ----------------------------------------------------------------------------
-    -- U7: MMCM DRP Controller
+    -- U7: MMCM DRP Controller (Stable Nominal 25 MHz Core Clock)
     ----------------------------------------------------------------------------
     u_mmcm_drp : entity work.mmcm_drp
         port map (
@@ -391,60 +333,17 @@ begin
             drp_do        => drp_do,
             drp_drdy      => drp_drdy,
             mmcm_locked   => mmcm_locked,
-            glitch_req    => total_glitch_req,
-            glitch_div    => total_glitch_div,
-            glitch_dur_us => total_glitch_dur,
-            set_div_req   => total_div_req,
-            set_div_val   => total_div_val,
+            glitch_req    => '0',
+            glitch_div    => to_unsigned(40, 8),
+            glitch_dur_us => to_unsigned(0, 16),
+            set_div_req   => '0',
+            set_div_val   => to_unsigned(40, 8),
             drp_busy      => drp_busy,
             glitch_active => glitch_act
         );
 
-    ----------------------------------------------------------------------------
-    -- U2: UART Host Interface (115200-8N1)
-    ----------------------------------------------------------------------------
-    u_uart : entity work.uart_host
-        port map (
-            clk100      => clk100,
-            rstn        => rstn,
-            uart_rx_pin => UART_RXD_OUT,
-            uart_tx_pin => UART_TXD_IN,
-            rx_byte     => rx_byte,
-            rx_valid    => rx_valid,
-            tx_byte     => tx_byte,
-            tx_valid    => tx_valid,
-            tx_ready    => tx_ready
-        );
-
-    ----------------------------------------------------------------------------
-    -- U2b: Command Parser & Preset Sequencer
-    ----------------------------------------------------------------------------
-    u_parser : entity work.cmd_parser
-        port map (
-            clk100        => clk100,
-            rstn          => rstn,
-            rx_byte       => rx_byte,
-            rx_valid      => rx_valid,
-            tx_byte       => tx_byte,
-            tx_valid      => tx_valid,
-            tx_ready      => tx_ready,
-            sensor_mode   => sensor_mode_cfg,
-            arm_en        => arm_cfg,
-            bypass_snn    => bypass_cfg,
-            esc_th        => esc_th_cfg,
-            unlock_pulse  => unlock_p,
-            key_load_en   => key_load_en,
-            key_data      => key_data,
-            manual_wipe   => manual_wipe,
-            synth_spikes  => synth_spikes,
-            synth_q       => synth_q,
-            glitch_req    => glitch_req,
-            glitch_div    => glitch_div,
-            glitch_dur_us => glitch_dur_us,
-            stress_en     => stress_en,
-            attack_active => attack_active,
-            log_mode      => log_mode
-        );
+    -- Standalone FPGA Hardware Mode (UART line held idle high)
+    UART_TXD_IN <= '1';
 
     ----------------------------------------------------------------------------
     -- U3: Clock Monitor (Layer 1)
@@ -494,7 +393,7 @@ begin
         port map (
             clk100     => clk100,
             rstn       => rstn,
-            stress_en  => total_stress_en,
+            stress_en  => SW(13),
             active_out => open
         );
 
@@ -503,15 +402,19 @@ begin
     ----------------------------------------------------------------------------
     u_victim : entity work.victim_core
         port map (
-            clk_core      => clk_core,
-            rstn_core     => rstn_core,
-            key_load_en   => key_load_en,
-            key_in        => key_data,
-            zeroize_pulse => total_zeroize,
-            req_out       => v_req_async,
-            ack_in        => v_ack_async,
-            digest_out    => v_digest_async,
-            zeroized_out  => v_zeroized
+            clk_core         => clk_core,
+            rstn_core        => rstn_core,
+            key_load_en      => key_load_en,
+            key_in           => key_data,
+            zeroize_pulse    => total_zeroize,
+            req_out          => v_req_async,
+            ack_in           => v_ack_async,
+            digest_out       => v_digest_async,
+            zeroized_out     => v_zeroized,
+            key_disp         => key_disp_val,
+            cosmic_flip_p    => cosmic_flip_core,
+            corrupt_inject_h => sw12_trip,
+            key_corrupt_out  => key_corrupt_core
         );
 
     ----------------------------------------------------------------------------
@@ -542,7 +445,7 @@ begin
             real_mmcm_unlock  => g_mmcm_unlock_h,
             real_v_under_h    => g_v_under_h,
             real_v_over_h     => g_v_over_h,
-            real_key_corr_h   => key_corrupt_h,
+            real_key_corr_h   => key_corrupt_h or key_corrupt_core,
             real_jtag_h       => '0', -- mon_jtag stretch goal
             real_clk_soft_spk => g_clk_soft_spk,
             real_clk_soft_q   => g_clk_soft_q,
@@ -590,7 +493,7 @@ begin
             bypass_snn       => bypass_cfg,
             esc_th           => esc_th_cfg,
             unlock_pulse     => unlock_p,
-            attack_active    => total_attack_act,
+            attack_active    => sw_extreme_trip,
             zeroize_pulse    => zeroize_pulse,
             alert_latched    => is_alert,
             zeroized_latched => is_zeroized,
@@ -616,6 +519,7 @@ begin
             active_class   => active_class,
             v_n1_membrane  => v_membranes(1),
             spike_count    => alert_cnt_out,
+            key_display    => key_disp_val,
             seg_an         => AN,
             seg_cath       => SEG,
             seg_dp         => DP
@@ -636,8 +540,8 @@ begin
     LED(9)  <= snn_fires(2); -- N2 Fire
     LED(10) <= snn_fires(3);
     LED(11) <= glitch_act;
-    LED(12) <= total_attack_act;
-    LED(13) <= total_stress_en;
+    LED(12) <= SW(12);                                     -- Extreme Memory Tamper Switch (H6)
+    LED(13) <= SW(13);                                     -- Extreme Stress Switch (U12)
     LED(14) <= is_zeroized or v_zeroized;                  -- GSR ACTIVE (LED14 ON, Red Hazard)
     LED(15) <= is_alert and not (is_zeroized or v_zeroized); -- WARNING ACTIVE (LED15 ON only when 1 spike warning)
 
