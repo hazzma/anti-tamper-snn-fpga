@@ -224,9 +224,9 @@ begin
     g_v_soft_spk    <= v_soft_spk and (not SW(0));
     g_v_soft_q      <= v_soft_q when SW(0) = '0' else (others => '0');
 
-    -- OR-reduction of all Layer 1 Hard Flags
-    hard_alert_or <= g_clk_fast_h or g_clk_slow_h or g_clk_stop_h or
-                     g_mmcm_unlock_h or g_v_under_h or g_v_over_h or key_corrupt_h;
+    -- OR-reduction of genuine Layer 1 Hard Flags (severe clock faults & MMCM unlock)
+    hard_alert_or <= g_clk_fast_h or g_clk_stop_h or g_mmcm_unlock_h or
+                     (g_v_under_h and sensor_mode_cfg(0)) or (g_v_over_h and sensor_mode_cfg(0));
 
     -- Hardware Controls
     total_glitch_req <= glitch_req or seq_glitch_req;
@@ -253,9 +253,9 @@ begin
                 btnc_pulse     <= '0';
                 btnu_pulse     <= '0';
                 btnd_pulse     <= '0';
-                sw15_d         <= '0';
-                sw14_d         <= '0';
-                sw13_d         <= '0';
+                sw15_d         <= SW(15);
+                sw14_d         <= SW(14);
+                sw13_d         <= SW(13);
                 sw15_edge      <= '0';
                 sw14_edge      <= '0';
                 sw13_edge      <= '0';

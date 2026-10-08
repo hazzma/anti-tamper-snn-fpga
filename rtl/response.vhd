@@ -122,8 +122,8 @@ begin
                         class_latched <= "00"; -- Hard flag attributed to transient/L1
                     end if;
 
-                    -- Increment escalation counter
-                    if alert_cnt < 255 then
+                    -- Increment escalation counter (capped at esc_th so display shows clean spike count)
+                    if is_zeroized = '0' and alert_cnt < esc_th then
                         alert_cnt <= alert_cnt + 1;
                     end if;
 
