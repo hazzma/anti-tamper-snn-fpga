@@ -131,15 +131,15 @@ begin
                 spikes_active(CH_JTAG_H)        <= real_jtag_h;
                 spikes_q_out(CH_JTAG_H)         <= to_unsigned(15, 4);
 
-                -- Voltage channels from Synth (allows controlled sub-threshold voltage dips)
+                -- Voltage channels: Allow real_v_soft_spk (BTNU) or synth_spikes
                 spikes_active(CH_V_UNDER_H)     <= synth_spikes(CH_V_UNDER_H);
                 spikes_q_out(CH_V_UNDER_H)      <= synth_q(CH_V_UNDER_H);
 
                 spikes_active(CH_V_OVER_H)      <= synth_spikes(CH_V_OVER_H);
                 spikes_q_out(CH_V_OVER_H)       <= synth_q(CH_V_OVER_H);
 
-                spikes_active(CH_V_SOFT)        <= synth_spikes(CH_V_SOFT);
-                spikes_q_out(CH_V_SOFT)         <= synth_q(CH_V_SOFT);
+                spikes_active(CH_V_SOFT)        <= real_v_soft_spk or synth_spikes(CH_V_SOFT);
+                spikes_q_out(CH_V_SOFT)         <= real_v_soft_q when real_v_soft_spk = '1' else synth_q(CH_V_SOFT);
         end case;
             end if;
         end if;

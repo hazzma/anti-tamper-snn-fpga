@@ -139,13 +139,16 @@ architecture rtl of top is
     signal latency_cycles : unsigned(31 downto 0);
     signal heartbeat_led  : std_logic;
 
-    -- Button Edge Detection & Debouncing
+    -- Button Edge Detection & Debouncing (20 ms lockout timer @ 100MHz)
     signal btnc_d1, btnc_d2   : std_logic := '0';
     signal btnu_d1, btnu_d2   : std_logic := '0';
     signal btnd_d1, btnd_d2   : std_logic := '0';
     signal btnc_pulse         : std_logic := '0';
     signal btnu_pulse         : std_logic := '0';
     signal btnd_pulse         : std_logic := '0';
+    signal btnc_lockout       : unsigned(20 downto 0) := (others => '0');
+    signal btnu_lockout       : unsigned(20 downto 0) := (others => '0');
+    signal btnd_lockout       : unsigned(20 downto 0) := (others => '0');
 
     -- Switch Edge Detectors & Extreme Trips (SW15, SW14, SW13, SW12)
     signal sw15_d, sw14_d, sw13_d, sw12_d : std_logic := '0';
@@ -154,7 +157,6 @@ architecture rtl of top is
     signal sw_extreme_trip    : std_logic := '0';
     signal seq_manual_spk     : std_logic := '0';
     signal arm_active         : std_logic := '1';
-    signal event_counter      : unsigned(15 downto 0) := (others => '0');
 
     -- Switch-gated Monitor Flags (SW(0) = Monitor Bypass / Disarm)
     signal g_clk_fast_h       : std_logic;
@@ -271,6 +273,9 @@ begin
                 btnc_pulse     <= '0';
                 btnu_pulse     <= '0';
                 btnd_pulse     <= '0';
+                btnc_lockout   <= (others => '0');
+                btnu_lockout   <= (others => '0');
+                btnd_lockout   <= (others => '0');
                 sw15_d         <= SW(15);
                 sw14_d         <= SW(14);
                 sw13_d         <= SW(13);
@@ -281,16 +286,43 @@ begin
                 sw12_edge      <= '0';
                 seq_manual_spk <= '0';
                 cosmic_toggle  <= '0';
-                event_counter  <= (others => '0');
             else
-                btnc_d1    <= BTNC; btnc_d2 <= btnc_d1;
-                btnc_pulse <= btnc_d1 and not btnc_d2;
+                btnc_d1 <= BTNC; btnc_d2 <= btnc_d1;
+                btnu_d1 <= BTNU; btnu_d2 <= btnu_d1;
+                btnd_d1 <= BTND; btnd_d2 <= btnd_d1;
 
-                btnu_d1    <= BTNU; btnu_d2 <= btnu_d1;
-                btnu_pulse <= btnu_d1 and not btnu_d2;
+                -- Debounced single pulse for BTNC (Center / Soft Clock Glitch)
+                if (btnc_d1 = '1' and btnc_d2 = '0' and btnc_lockout = 0) then
+                    btnc_pulse   <= '1';
+                    btnc_lockout <= to_unsigned(2000000, 21); -- 20 ms debounce lockout
+                else
+                    btnc_pulse <= '0';
+                    if btnc_lockout > 0 then
+                        btnc_lockout <= btnc_lockout - 1;
+                    end if;
+                end if;
 
-                btnd_d1    <= BTND; btnd_d2 <= btnd_d1;
-                btnd_pulse <= btnd_d1 and not btnd_d2;
+                -- Debounced single pulse for BTNU (Up / Soft Voltage Drop)
+                if (btnu_d1 = '1' and btnu_d2 = '0' and btnu_lockout = 0) then
+                    btnu_pulse   <= '1';
+                    btnu_lockout <= to_unsigned(2000000, 21); -- 20 ms debounce lockout
+                else
+                    btnu_pulse <= '0';
+                    if btnu_lockout > 0 then
+                        btnu_lockout <= btnu_lockout - 1;
+                    end if;
+                end if;
+
+                -- Debounced single pulse for BTND (Down / Cosmic Ray SEU)
+                if (btnd_d1 = '1' and btnd_d2 = '0' and btnd_lockout = 0) then
+                    btnd_pulse   <= '1';
+                    btnd_lockout <= to_unsigned(2000000, 21); -- 20 ms debounce lockout
+                else
+                    btnd_pulse <= '0';
+                    if btnd_lockout > 0 then
+                        btnd_lockout <= btnd_lockout - 1;
+                    end if;
+                end if;
 
                 sw15_d    <= SW(15);
                 sw15_edge <= SW(15) and not sw15_d;
@@ -310,12 +342,6 @@ begin
                 end if;
 
                 seq_manual_spk <= btnc_pulse or btnd_pulse or btnu_pulse;
-
-                -- 4-Digit incident counter: increments on each button click or extreme switch edge
-                if (btnc_pulse = '1' or btnu_pulse = '1' or btnd_pulse = '1' or
-                    sw15_edge = '1' or sw14_edge = '1' or sw13_edge = '1' or sw12_edge = '1') then
-                    event_counter <= event_counter + 1;
-                end if;
             end if;
         end if;
     end process p_hw_seq;
@@ -537,7 +563,6 @@ begin
             zeroize_status  => is_zeroized or v_zeroized,
             active_class    => active_class,
             v_n1_membrane   => v_membranes(1),
-            counter_display => event_counter,
             key_display     => key_disp_val,
             seg_an          => AN,
             seg_cath        => SEG,

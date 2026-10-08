@@ -189,17 +189,17 @@ Empat switch paling kiri (`SW[15:12]`) adalah **Mode Serangan Ekstrem** yang lan
 
 | Skenario Uji | Saklar Fisik | Tombol Eksekusi | Layar 7-Segment | Indikator LED & Efek Sistem |
 | :--- | :---: | :---: | :---: | :--- |
-| **1. Normal Armed (Boot Awal)** | Semua Saklar di BAWAH (`0`) | *(Tidak ada)* | `0123 . 0000` | Normal Armed. Kunci `0123`, counter `0000`. RGB LED menyala **HIJAU** (`LED16` & `LED17`). `LED[0]` denyut 1 Hz. |
-| **2. Cosmic Ray Test (1x BTND)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTND` (`P18`)** 1 kali | `0122 . 0001` | Bit kunci terbalik (`0123` $\rightarrow$ `0122`), counter naik `0001`. SNN menganggap anomali alami (surut sendiri). **RGB tetap HIJAU, tidak ada alarm.** |
-| **3. Soft Clock Glitch (1x BTNC)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNC` (`N17`)** 1 kali | `0123 . 0002` | Muatan clock $+50$ masuk ke SNN ($\Theta=128$), counter `0002`. Surut dalam ~1.5 detik. **RGB tetap HIJAU.** |
-| **4. Soft Voltage Drop (1x BTNU)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNU` (`M18`)** 1 kali | `0123 . 0003` | Muatan voltage $+50$ masuk ke SNN, counter `0003`. Surut dalam ~1.5 detik. **RGB tetap HIJAU.** |
-| **5. Spam 3x Cepat (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`BTNC` / `BTNU` / `BTND`** 3x cepat | `0123 . 0006` | Akumulasi $150 \ge 128 \implies$ SNN ember luber ke-1! RGB LED seketika berubah **KUNING** (Alert)! `LED[15]` ON! |
-| **6. Spam Lanjutan (GSR ZEROIZE)**| Semua Saklar di BAWAH (`0`) | Spam 3x cepat lagi | `0000 . 0009` | SNN luber ke-2 $\rightarrow$ **GSR ZEROIZE!** Kunci dihapus total menjadi `0000`. RGB LED berubah **MERAH** (Bahaya)! `LED[14]` ON! |
-| **7. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . 000A` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap jadi `0000`, RGB **MERAH**, `LED[14]` ON! |
-| **8. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . 000B` | Layer 1 Hard Trip instan! Kunci lenyap jadi `0000`, RGB **MERAH**! |
-| **9. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . 000C` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap jadi `0000`, RGB **MERAH**! |
-| **10. Extreme Memory Tamper (H6)**| Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . 000D` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total jadi `0000`, RGB **MERAH**! |
-| **11. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . 0000` | Kunci dipulihkan ke `0123`, counter di-reset ke `0000`, RGB LED kembali **HIJAU**! |
+| **1. Normal Armed (Boot Awal)** | Semua Saklar di BAWAH (`0`) | *(Tidak ada)* | `0123 . 0000` | Normal Armed. Kunci `0123`, potensi membran `0000`. RGB LED menyala **HIJAU** (`LED16` & `LED17`). `LED[0]` denyut 1 Hz. |
+| **2. Cosmic Ray Test (1x BTND)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTND` (`P18`)** 1 kali | `0122 . 0050` $\rightarrow$ `0122 . 0000` | Bit kunci terbalik (`0123` $\rightarrow$ `0122`), muatan bertambah $+50$ lalu **surut bertahap kembali ke `0000`** dalam ~1.5 detik (noise immunity). **RGB tetap HIJAU, tidak ada alarm.** |
+| **3. Soft Clock Glitch (1x BTNC)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNC` (`N17`)** 1 kali | `0123 . 0050` $\rightarrow$ `0123 . 0000` | Muatan clock $+50$ masuk ke ember membran, lalu **surut bertahap kembali ke `0000`** dalam ~1.5 detik berkat Leaky Decay. **RGB tetap HIJAU (Imunitas Noise Terbukti).** |
+| **4. Soft Voltage Drop (1x BTNU)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNU` (`M18`)** 1 kali | `0123 . 0050` $\rightarrow$ `0123 . 0000` | Muatan voltage $+50$ masuk ke ember membran lalu **surut bertahap kembali ke `0000`**. **RGB tetap HIJAU.** |
+| **5. Spam 3x Cepat (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`BTNC` / `BTNU` / `BTND`** 3x cepat | `0123 . 0022` | Akumulasi muatan melampaui batas ($150 \ge 128$) $\implies$ Ember membran luber ke-1! Subtractive reset menyisakan $22$, RGB LED seketika berubah **KUNING** (Alert)! `LED[15]` ON! |
+| **6. Spam Lanjutan (GSR ZEROIZE)**| Semua Saklar di BAWAH (`0`) | Spam 3x cepat lagi | `0000 . 0000` | Ember membran luber ke-2 $\rightarrow$ **GSR ZEROIZE!** Kunci dihapus total menjadi `0000`, membran di-reset ke `0000`. RGB LED berubah **MERAH** (Bahaya)! `LED[14]` ON! |
+| **7. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . 0000` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap jadi `0000`, RGB **MERAH**, `LED[14]` ON! |
+| **8. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . 0000` | Layer 1 Hard Trip instan! Kunci lenyap jadi `0000`, RGB **MERAH**! |
+| **9. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . 0000` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap jadi `0000`, RGB **MERAH**! (`LED13`/`V14` tetap padam). |
+| **10. Extreme Memory Tamper (H6)**| Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . 0000` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total jadi `0000`, RGB **MERAH**! (`LED12`/`V15` tetap padam). |
+| **11. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . 0000` | Kunci dipulihkan ke `0123`, membran kembali ke `0000`, RGB LED kembali **HIJAU**! |
 
 ---
 
@@ -210,8 +210,8 @@ Empat switch paling kiri (`SW[15:12]`) adalah **Mode Serangan Ekstrem** yang lan
 | **LED[0]** | `H17` | `heartbeat_led` | **1 Hz Heartbeat `clk100`**: Berkedip 1 Hz menandakan FPGA & osilator hidup normal. |
 | **LED[1]** | `K15` | `mmcm_locked` | **MMCM Locked**: Menyala jika clock 25 MHz valid dan terkunci. |
 | **LED[2]** | `J13` | `arm_active` | **Armed Indicator**: Menyala menandakan sistem bersenjata aktif (default ON saat semua switch 0). |
-| **LED[12]**| `V15` | `SW[12]` | **Extreme Memory Tamper Switch (H6)**: Menyala saat switch H6 aktif. |
-| **LED[13]**| `V14` | `SW[13]` | **Extreme Thermal Switch (U12)**: Menyala saat switch U12 aktif (stressor on-chip menyala). |
+| **LED[12]**| `V15` | Ground (`0`) | **Idle / Padam**: Diproteksi padam agar tidak silau/rancu saat switch `H6` aktif. |
+| **LED[13]**| `V14` | Ground (`0`) | **Idle / Padam**: Diproteksi padam agar tidak silau/rancu saat switch `U12` aktif. |
 | **LED[14]**| `V12` | `is_zeroized` | 🔴 **GSR / ZEROIZED ACTIVE (Bahaya)**: Menyala terkunci jika terjadi mitigasi darurat / switch ekstrem (Kunci dimusnahkan total)! |
 | **LED[15]**| `V11` | `is_alert` | 🟡 **WARNING ACTIVE**: Menyala khusus saat terjadi 1 spike (peringatan dini / Alert sebelum eskalasi zeroize). |
 
@@ -224,16 +224,16 @@ Display 8 digit 7-segment pada Nexys A7 dibagi menjadi 2 zona yang dipisahkan ol
 ```text
  +-------+-------+-------+-------+       +-------+-------+-------+-------+
  |  AN7  |  AN6  |  AN5  |  AN4  |   .   |  AN3  |  AN2  |  AN1  |  AN0  |
- |        KEY DISPLAY (4 DIGIT)   |   DP  |        EVENT COUNTER (4 DIGIT)|
- |  [0123] Normal / [0000] Wiped | [ON]  |  [0]  |  [0]  |  [0]  |  [0]  |
+ |        KEY DISPLAY (4 DIGIT)   |   DP  |      SNN MEMBRANE V[N1] (DESIMAL)|
+ |  [0123] Normal / [0000] Wiped | [ON]  |  [0]  |  [0]  |  [5]  |  [0]  |
  +-------+-------+-------+-------+       +-------+-------+-------+-------+
 ```
 
 | Zona Display | Digit | Tampilan | Arti & Maknanya |
 | :--- | :---: | :---: | :--- |
 | **Zona Kiri (Kunci AES)** | **`AN[7:4]`** | **`0123`** atau **`0000`** | **Prefix Kunci Kriptografi AES**:<br>• Normal: Menampilkan hex **`0123`**.<br>• Cosmic Ray (1x BTND): Menampilkan **`0122`** (1 bit terbalik pada memori kunci).<br>• **GSR / Zeroize**: Menampilkan **`0000`** (kunci terhapus bersih dari hardware)! |
-| **Pemisah Desimal** | **`DP` (Digit 4)** | **`.` (Menyala)** | **Decimal Point** aktif di digit 4 sebagai pemisah visual antara Kunci dan Counter. |
-| **Zona Kanan (Event Counter)** | **`AN[3:0]`** | **`0000` s.d. `FFFF`** | **Full 4-Digit Incident Counter**:<br>• Menampilkan jumlah event/klik tombol serangan dan switch ekstrem.<br>• Setiap klik bertambah 1 (`0000` $\rightarrow$ `0001` $\rightarrow$ `0002` ...).<br>• Reset ke `0000` saat tombol `CPU_RESETN` ditekan. |
+| **Pemisah Desimal** | **`DP` (Digit 4)** | **`.` (Menyala)** | **Decimal Point** aktif di digit 4 sebagai pemisah visual antara Kunci dan Nilai Membran SNN. |
+| **Zona Kanan (SNN Membrane)** | **`AN[3:0]`** | **`0000` s.d. `9999` (Desimal)** | **Kalkulasi Potensi Membran SNN (Isi Air Ember LIF)**:<br>• Menampilkan akumulasi muatan secara real-time dalam angka desimal.<br>• Saat tombol ditekan 1x, nilai langsung naik $+50$ (tampil `0050`).<br>• **Fitur Leaky Decay**: Jika didiamkan, angka surut bertahap (`0050` $\rightarrow$ `0038` $\rightarrow$ `0029` $\rightarrow$ `0000`) dalam ~1.5 detik. Membuktikan ke penguji/dosen bahwa sistem kebal terhadap noise sesaat.<br>• **Fitur Luber / Ambang Batas ($\Theta=128$)**: Jika dispam cepat 3x berturut-turut ($50 \times 3 = 150 \ge 128$), ember meluap dan memicu status WARNING! |
 
 ### 💡 Indikator Status via Multi-Color RGB LEDs (`LED16` & `LED17`)
 
