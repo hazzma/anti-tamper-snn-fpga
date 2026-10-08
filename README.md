@@ -160,10 +160,12 @@ Seluruh pemetaan pin disesuaikan dengan file master XDC resmi Digilent Nexys A7-
 
 | Tombol | Pin FPGA | Nama Sinyal | Karakteristik & Respon Sistem |
 | :--- | :---: | :--- | :--- |
-| **CPU_RESETN** (Tombol Merah) | `C12` | `CPU_RESETN` | **Master Hardware Reset** (Active-Low): Me-restore kunci AES ke `0123`, mereset membran SNN ke 0, me-reset counter ke 0, status kembali ke `0123 . C0Ar`. |
-| **BTNC** (Center / Tengah) | `N17` | `BTNC` | **Manual Soft Clock Glitch (+50 ke Leaky Bucket SNN)**:<br>• 1x Tekan: Menambah muatan $+50$ ke membran SNN ($\Theta=128$), ember tidak luber, surut sendiri dalam ~1.5 detik.<br>• 3x Tekan Cepat: Akumulasi $3 \times 50 = 150 \ge 128 \implies$ SNN Luber ke-1 $\rightarrow$ Status **Warning (`C1AL`)**, `LED[15]` ON!<br>• 6x Tekan Cepat: SNN Luber ke-2 $\rightarrow$ **GSR Zeroize (`0000 . C2ZO`)**, `LED[14]` ON, Kunci di-wipe ke `0000`! |
-| **BTND** (Down / Bawah) | `P18` | `BTND` | **Memory Integrity / Cosmic Ray Single-Event Upset (SEU)**:<br>• 1x Tekan: Membalik 1 bit pada kunci kripto (`0123` $\rightarrow$ `0122`) dan menyuntik 1 soft spike ke SNN. Dianggap sebagai radiasi cosmic ray alami tanpa memicu alarm (`0122 . C0Ar`).<br>• Spam Beruntun: SNN mendeteksi anomali bertubi-tubi (fault attack aktif), membran meluap $\rightarrow$ memicu Warning (`C1AL`) hingga GSR Zeroize (`0000 . C2ZO`)! |
+| **CPU_RESETN** (Tombol Merah) | `C12` | `CPU_RESETN` | **Master Hardware Reset** (Active-Low): Me-restore kunci AES ke `0123`, mereset membran SNN ke 0, status kembali ke `0123 . 0000` (RGB Hijau). |
+| **BTNC** (Center / Tengah) | `N17` | `BTNC` | **Manual Soft Clock Glitch (+50 ke Leaky Bucket SNN)**:<br>• 1x Tekan: Menambah muatan $+50$ ke membran SNN ($\Theta=128$), ember tidak luber, surut sendiri dalam ~1.5 detik.<br>• 3x Tekan Cepat: Akumulasi $3 \times 50 = 150 \ge 128 \implies$ SNN Luber ke-1 $\rightarrow$ Status **Warning (Kuning)**, `LED[15]` ON!<br>• 6x Tekan Cepat: SNN Luber ke-2 $\rightarrow$ **GSR Zeroize (`0000 . 0000`)**, `LED[14]` ON, RGB Merah! |
+| **BTND** (Down / Bawah) | `P18` | `BTND` | **Memory Integrity / Cosmic Ray Single-Event Upset (SEU)**:<br>• 1x Tekan: Membalik 1 bit pada kunci kripto (`0123` $\rightarrow$ `0122`) dan menyuntik muatan $+50$ ke SNN. Angka surut alami ke 0 tanpa memicu alarm.<br>• Spam Beruntun: SNN mendeteksi anomali bertubi-tubi $\rightarrow$ memicu Warning hingga GSR Zeroize (`0000 . 0000`)! |
 | **BTNU** (Up / Atas) | `M18` | `BTNU` | **Manual Soft Voltage Drop (+50 ke Leaky Bucket SNN)**:<br>• Menyuntik pulsa drop tegangan halus (+50 muatan air) ke saluran `CH_V_SOFT`. 1x klik surut dalam ~1.5 detik. Spam 3x cepat memicu Warning (Kuning), 6x memicu GSR Zeroize (Merah)! |
+| **BTNL** (Left / Kiri) | `P17` | `BTNL` | **Manual Soft Temperature Anomaly (+50 ke Leaky Bucket SNN)**:<br>• Menyuntik anomali thermal halus (+50 muatan air) ke saluran `CH_TEMP_SOFT`. 1x klik surut dalam ~1.5 detik. Spam 3x cepat memicu Warning (Kuning), 6x memicu GSR Zeroize (Merah)! |
+| **BTNR** (Right / Kanan) | `M17` | `BTNR` | **Capacitance Microprobing Sensor (+10 per tick, Hold to Accumulate)**:<br>• **Fitur Probing Berkelanjutan**: Mensimulasikan sentuhan jarum kapasitif probe fisik ke chip.<br>• **Hold / Tekan Tahan**: Selama ditekan, muatan kecil ($+10$) terus disuntikkan setiap 40 ms mengalahkan leaky decay! Nilai membran perlahan merayap naik (`0010` $\rightarrow$ `0030` $\rightarrow$ `0060` $\dots$ $\rightarrow$ $\ge 128$) memicu **Warning (Kuning)** lalu **GSR Zeroize (Merah)**!<br>• **Tap Singkat / Lepas**: Angka langsung meluruh turun ke `0000` (noise filter terbukti)! |
 
 ---
 
@@ -176,10 +178,10 @@ Empat switch paling kiri (`SW[15:12]`) adalah **Mode Serangan Ekstrem** yang lan
 
 | Saklar Fisik | Pin FPGA | Posisi Standar | Fungsi & Aksi Saat Dinaikkan (Mode Ekstrem) |
 | :--- | :---: | :---: | :--- |
-| **`SW[15]`** *(Paling Kiri)* | `V10` | Bawah (`0`) | **Extreme Clock Glitch Trip**: Menembus Layer 1 langsung $\rightarrow$ Seketika mengunci ke `0000 . C2ZO`, `LED[14]` ON, Kunci dihapus total (<40 ns)! |
-| **`SW[14]`** *(Ke-2 Kiri)* | `U11` | Bawah (`0`) | **Extreme Voltage Drop Trip**: Menembus Layer 1 langsung $\rightarrow$ Seketika mengunci ke `0000 . C2ZO`, `LED[14]` ON! |
-| **`SW[13]`** *(Ke-3 Kiri)* | `U12` | Bawah (`0`) | **Extreme Thermal / Multi-Stress Trip**: Menyalakan stressor on-chip & menembus Layer 1 langsung $\rightarrow$ Instant Lock `0000 . C2ZO`, `LED[13]` & `LED[14]` ON! |
-| **`SW[12]`** *(Ke-4 Kiri)* | `H6` | Bawah (`0`) | **Extreme Memory Tamper Trip**: Merusak memori kunci secara paksa & menembus Layer 1 langsung $\rightarrow$ Instant Lock `0000 . C2ZO`, `LED[12]` & `LED[14]` ON! |
+| **`SW[15]`** *(Paling Kiri)* | `V10` | Bawah (`0`) | **Extreme Clock Glitch Trip**: Menembus Layer 1 langsung $\rightarrow$ Seketika mengunci ke `0000 . 0000`, `LED[14]` ON, RGB Merah, Kunci dihapus total (<40 ns)! |
+| **`SW[14]`** *(Ke-2 Kiri)* | `U11` | Bawah (`0`) | **Extreme Voltage Drop Trip**: Menembus Layer 1 langsung $\rightarrow$ Seketika mengunci ke `0000 . 0000`, `LED[14]` ON, RGB Merah! |
+| **`SW[13]`** *(Ke-3 Kiri)* | `U12` | Bawah (`0`) | **Extreme Thermal / Multi-Stress Trip**: Menyalakan stressor on-chip & menembus Layer 1 langsung $\rightarrow$ Instant Lock `0000 . 0000`, RGB Merah! |
+| **`SW[12]`** *(Ke-4 Kiri)* | `H6` | Bawah (`0`) | **Extreme Memory Tamper Trip**: Merusak memori kunci secara paksa & menembus Layer 1 langsung $\rightarrow$ Instant Lock `0000 . 0000`, RGB Merah! |
 | **`SW[11]` s.d. `SW[1]`** | Beragam | Bawah (`0`) | *Reserved*. Biarkan di bawah (`0`). |
 | **`SW[0]`** *(Paling Kanan)* | `J15` | Bawah (`0`) | **Monitor Disarm Switch**: `0` = Armed (Bersenjata, default), `1` = Bypass/Disarm. |
 
@@ -193,13 +195,14 @@ Empat switch paling kiri (`SW[15:12]`) adalah **Mode Serangan Ekstrem** yang lan
 | **2. Cosmic Ray Test (1x BTND)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTND` (`P18`)** 1 kali | `0122 . 0050` $\rightarrow$ `0122 . 0000` | Bit kunci terbalik (`0123` $\rightarrow$ `0122`), muatan bertambah $+50$ lalu **surut bertahap kembali ke `0000`** dalam ~1.5 detik (noise immunity). **RGB tetap HIJAU, tidak ada alarm.** |
 | **3. Soft Clock Glitch (1x BTNC)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNC` (`N17`)** 1 kali | `0123 . 0050` $\rightarrow$ `0123 . 0000` | Muatan clock $+50$ masuk ke ember membran, lalu **surut bertahap kembali ke `0000`** dalam ~1.5 detik berkat Leaky Decay. **RGB tetap HIJAU (Imunitas Noise Terbukti).** |
 | **4. Soft Voltage Drop (1x BTNU)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNU` (`M18`)** 1 kali | `0123 . 0050` $\rightarrow$ `0123 . 0000` | Muatan voltage $+50$ masuk ke ember membran lalu **surut bertahap kembali ke `0000`**. **RGB tetap HIJAU.** |
-| **5. Spam 3x Cepat (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`BTNC` / `BTNU` / `BTND`** 3x cepat | `0123 . 0022` | Akumulasi muatan melampaui batas ($150 \ge 128$) $\implies$ Ember membran luber ke-1! Subtractive reset menyisakan $22$, RGB LED seketika berubah **KUNING** (Alert)! `LED[15]` ON! |
-| **6. Spam Lanjutan (GSR ZEROIZE)**| Semua Saklar di BAWAH (`0`) | Spam 3x cepat lagi | `0000 . 0000` | Ember membran luber ke-2 $\rightarrow$ **GSR ZEROIZE!** Kunci dihapus total menjadi `0000`, membran di-reset ke `0000`. RGB LED berubah **MERAH** (Bahaya)! `LED[14]` ON! |
-| **7. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . 0000` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap jadi `0000`, RGB **MERAH**, `LED[14]` ON! |
-| **8. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . 0000` | Layer 1 Hard Trip instan! Kunci lenyap jadi `0000`, RGB **MERAH**! |
-| **9. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . 0000` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap jadi `0000`, RGB **MERAH**! (`LED13`/`V14` tetap padam). |
-| **10. Extreme Memory Tamper (H6)**| Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . 0000` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total jadi `0000`, RGB **MERAH**! (`LED12`/`V15` tetap padam). |
-| **11. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . 0000` | Kunci dipulihkan ke `0123`, membran kembali ke `0000`, RGB LED kembali **HIJAU**! |
+| **5. Soft Thermal Anomaly (1x BTNL)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNL` (`P17`)** 1 kali | `0123 . 0050` $\rightarrow$ `0123 . 0000` | Muatan suhu $+50$ masuk ke ember membran lalu **surut bertahap kembali ke `0000`**. **RGB tetap HIJAU.** |
+| **6. Capacitance Probing (Hold BTNR)**| Semua Saklar di BAWAH (`0`) | **HOLD / Tahan `BTNR` (`M17`)** | `0123 . 0010` $\rightarrow$ `0030` $\dots$ $\ge 0128$ | Muatan kecil ($+10$) terus disuntikkan secara kontinu. Angka merayap naik perlahan sampai meluap $\ge 128 \implies$ **WARNING (Kuning)**! Jika tetap ditahan $\implies$ **GSR ZEROIZE (Merah & Kunci `0000`)**! |
+| **7. Spam Cepat (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam tombol 3x cepat | `0123 . 0022` | Akumulasi muatan melampaui batas ($150 \ge 128$) $\implies$ Ember membran luber ke-1! Subtractive reset menyisakan $22$, RGB LED seketika berubah **KUNING** (Alert)! `LED[15]` ON! |
+| **8. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . 0000` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap jadi `0000`, RGB **MERAH**, `LED[14]` ON! |
+| **9. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . 0000` | Layer 1 Hard Trip instan! Kunci lenyap jadi `0000`, RGB **MERAH**! |
+| **10. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . 0000` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap jadi `0000`, RGB **MERAH**! (`LED13`/`V14` tetap padam). |
+| **11. Extreme Memory Tamper (H6)**| Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . 0000` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total jadi `0000`, RGB **MERAH**! (`LED12`/`V15` tetap padam). |
+| **12. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . 0000` | Kunci dipulihkan ke `0123`, membran kembali ke `0000`, RGB LED kembali **HIJAU**! |
 
 ---
 

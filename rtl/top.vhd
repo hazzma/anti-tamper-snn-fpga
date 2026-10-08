@@ -22,6 +22,8 @@ entity top is
         BTNC          : in  std_logic;
         BTNU          : in  std_logic;
         BTND          : in  std_logic;
+        BTNL          : in  std_logic; -- Left: Soft Temperature Anomaly
+        BTNR          : in  std_logic; -- Right: Capacitance Probing (Hold to accumulate)
         LED           : out std_logic_vector(15 downto 0);
         
         -- Multi-Color RGB LEDs (LD16, LD17)
@@ -138,17 +140,25 @@ architecture rtl of top is
     signal active_class   : std_logic_vector(1 downto 0);
     signal latency_cycles : unsigned(31 downto 0);
     signal heartbeat_led  : std_logic;
-
     -- Button Edge Detection & Debouncing (20 ms lockout timer @ 100MHz)
     signal btnc_d1, btnc_d2   : std_logic := '0';
     signal btnu_d1, btnu_d2   : std_logic := '0';
     signal btnd_d1, btnd_d2   : std_logic := '0';
+    signal btnl_d1, btnl_d2   : std_logic := '0';
+    signal btnr_d1, btnr_d2   : std_logic := '0';
     signal btnc_pulse         : std_logic := '0';
     signal btnu_pulse         : std_logic := '0';
     signal btnd_pulse         : std_logic := '0';
+    signal btnl_pulse         : std_logic := '0';
+    signal btnr_pulse         : std_logic := '0';
     signal btnc_lockout       : unsigned(20 downto 0) := (others => '0');
     signal btnu_lockout       : unsigned(20 downto 0) := (others => '0');
     signal btnd_lockout       : unsigned(20 downto 0) := (others => '0');
+    signal btnl_lockout       : unsigned(20 downto 0) := (others => '0');
+
+    -- Capacitance Probing Hold Timer (BTNR: Right Button)
+    signal btnr_hold_timer    : unsigned(22 downto 0) := (others => '0');
+    signal btnr_hold_pulse    : std_logic := '0';
 
     -- Switch Edge Detectors & Extreme Trips (SW15, SW14, SW13, SW12)
     signal sw15_d, sw14_d, sw13_d, sw12_d : std_logic := '0';
@@ -169,6 +179,10 @@ architecture rtl of top is
     signal g_clk_soft_q       : unsigned(3 downto 0);
     signal g_v_soft_spk       : std_logic;
     signal g_v_soft_q         : unsigned(3 downto 0);
+    signal g_temp_soft_spk    : std_logic;
+    signal g_temp_soft_q      : unsigned(3 downto 0);
+    signal g_probe_soft_spk   : std_logic;
+    signal g_probe_soft_q     : unsigned(3 downto 0);
 
     -- Combined zeroize signal to victim core
     signal total_zeroize      : std_logic;
@@ -241,6 +255,14 @@ begin
                        v_soft_q when SW(0) = '0' else
                        (others => '0');
 
+    -- BTNL (Left): Soft Temperature Anomaly (+50 weight)
+    g_temp_soft_spk <= btnl_pulse;
+    g_temp_soft_q   <= to_unsigned(1, 4) when btnl_pulse = '1' else (others => '0');
+
+    -- BTNR (Right): Capacitance Probing Sensor (+10 weight per tick, hold to accumulate)
+    g_probe_soft_spk <= btnr_pulse or btnr_hold_pulse;
+    g_probe_soft_q   <= to_unsigned(1, 4) when (btnr_pulse = '1' or btnr_hold_pulse = '1') else (others => '0');
+
     -- Extreme Switch Trip Generation:
     -- SW15 (V10): Extreme Clock Fault
     -- SW14 (U11): Extreme Voltage Fault
@@ -270,12 +292,21 @@ begin
                 btnu_d2        <= '0';
                 btnd_d1        <= '0';
                 btnd_d2        <= '0';
+                btnl_d1        <= '0';
+                btnl_d2        <= '0';
+                btnr_d1        <= '0';
+                btnr_d2        <= '0';
                 btnc_pulse     <= '0';
                 btnu_pulse     <= '0';
                 btnd_pulse     <= '0';
+                btnl_pulse     <= '0';
+                btnr_pulse     <= '0';
                 btnc_lockout   <= (others => '0');
                 btnu_lockout   <= (others => '0');
                 btnd_lockout   <= (others => '0');
+                btnl_lockout   <= (others => '0');
+                btnr_hold_timer<= (others => '0');
+                btnr_hold_pulse<= '0';
                 sw15_d         <= SW(15);
                 sw14_d         <= SW(14);
                 sw13_d         <= SW(13);
@@ -290,6 +321,8 @@ begin
                 btnc_d1 <= BTNC; btnc_d2 <= btnc_d1;
                 btnu_d1 <= BTNU; btnu_d2 <= btnu_d1;
                 btnd_d1 <= BTND; btnd_d2 <= btnd_d1;
+                btnl_d1 <= BTNL; btnl_d2 <= btnl_d1;
+                btnr_d1 <= BTNR; btnr_d2 <= btnr_d1;
 
                 -- Debounced single pulse for BTNC (Center / Soft Clock Glitch)
                 if (btnc_d1 = '1' and btnc_d2 = '0' and btnc_lockout = 0) then
@@ -324,6 +357,40 @@ begin
                     end if;
                 end if;
 
+                -- Debounced single pulse for BTNL (Left / Soft Thermal Anomaly)
+                if (btnl_d1 = '1' and btnl_d2 = '0' and btnl_lockout = 0) then
+                    btnl_pulse   <= '1';
+                    btnl_lockout <= to_unsigned(2000000, 21); -- 20 ms debounce lockout
+                else
+                    btnl_pulse <= '0';
+                    if btnl_lockout > 0 then
+                        btnl_lockout <= btnl_lockout - 1;
+                    end if;
+                end if;
+
+                -- Continuous hold accumulation for BTNR (Right / Capacitance Probing Sensor)
+                -- Initial tap pulse on rising edge:
+                if (btnr_d1 = '1' and btnr_d2 = '0') then
+                    btnr_pulse      <= '1';
+                    btnr_hold_timer <= (others => '0');
+                else
+                    btnr_pulse <= '0';
+                end if;
+
+                -- While held down: inject a small weight tick (+10) every 40 ms (4,000,000 cycles)
+                if btnr_d1 = '1' then
+                    if btnr_hold_timer >= 3999999 then
+                        btnr_hold_timer <= (others => '0');
+                        btnr_hold_pulse <= '1';
+                    else
+                        btnr_hold_timer <= btnr_hold_timer + 1;
+                        btnr_hold_pulse <= '0';
+                    end if;
+                else
+                    btnr_hold_timer <= (others => '0');
+                    btnr_hold_pulse <= '0';
+                end if;
+
                 sw15_d    <= SW(15);
                 sw15_edge <= SW(15) and not sw15_d;
 
@@ -341,7 +408,7 @@ begin
                     cosmic_toggle <= not cosmic_toggle;
                 end if;
 
-                seq_manual_spk <= btnc_pulse or btnd_pulse or btnu_pulse;
+                seq_manual_spk <= btnc_pulse or btnd_pulse or btnu_pulse or btnl_pulse or btnr_pulse;
             end if;
         end if;
     end process p_hw_seq;
@@ -481,25 +548,29 @@ begin
     ----------------------------------------------------------------------------
     u_sensor_mux : entity work.sensor_mux
         port map (
-            clk100            => clk100,
-            rstn              => rstn,
-            mode_sel          => sensor_mode_cfg,
-            real_clk_fast_h   => g_clk_fast_h,
-            real_clk_slow_h   => g_clk_slow_h,
-            real_clk_stop_h   => g_clk_stop_h,
-            real_mmcm_unlock  => g_mmcm_unlock_h,
-            real_v_under_h    => g_v_under_h,
-            real_v_over_h     => g_v_over_h,
-            real_key_corr_h   => key_corrupt_h or key_corrupt_core,
-            real_jtag_h       => '0', -- mon_jtag stretch goal
-            real_clk_soft_spk => g_clk_soft_spk,
-            real_clk_soft_q   => g_clk_soft_q,
-            real_v_soft_spk   => g_v_soft_spk,
-            real_v_soft_q     => g_v_soft_q,
-            synth_spikes      => synth_spikes,
-            synth_q           => synth_q,
-            spikes_active     => spikes_active,
-            spikes_q_out      => spikes_q_mux
+            clk100              => clk100,
+            rstn                => rstn,
+            mode_sel            => sensor_mode_cfg,
+            real_clk_fast_h     => g_clk_fast_h,
+            real_clk_slow_h     => g_clk_slow_h,
+            real_clk_stop_h     => g_clk_stop_h,
+            real_mmcm_unlock    => g_mmcm_unlock_h,
+            real_v_under_h      => g_v_under_h,
+            real_v_over_h       => g_v_over_h,
+            real_key_corr_h     => key_corrupt_h or key_corrupt_core,
+            real_jtag_h         => '0', -- mon_jtag stretch goal
+            real_clk_soft_spk   => g_clk_soft_spk,
+            real_clk_soft_q     => g_clk_soft_q,
+            real_v_soft_spk     => g_v_soft_spk,
+            real_v_soft_q       => g_v_soft_q,
+            real_temp_soft_spk  => g_temp_soft_spk,
+            real_temp_soft_q    => g_temp_soft_q,
+            real_probe_soft_spk => g_probe_soft_spk,
+            real_probe_soft_q   => g_probe_soft_q,
+            synth_spikes        => synth_spikes,
+            synth_q             => synth_q,
+            spikes_active       => spikes_active,
+            spikes_q_out        => spikes_q_mux
         );
 
     ----------------------------------------------------------------------------

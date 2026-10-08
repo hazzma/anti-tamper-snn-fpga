@@ -31,6 +31,10 @@ entity sensor_mux is
         real_clk_soft_q : in  unsigned(3 downto 0);
         real_v_soft_spk : in  std_logic;
         real_v_soft_q   : in  unsigned(3 downto 0);
+        real_temp_soft_spk : in  std_logic := '0';
+        real_temp_soft_q   : in  unsigned(3 downto 0) := (others => '0');
+        real_probe_soft_spk: in  std_logic := '0';
+        real_probe_soft_q  : in  unsigned(3 downto 0) := (others => '0');
         
         -- Synthetic Attack Injection Inputs (from cmd_parser / attack_seq)
         synth_spikes    : in  std_logic_vector(11 downto 0);
@@ -104,6 +108,12 @@ begin
                 spikes_active(CH_V_SOFT)        <= real_v_soft_spk;
                 spikes_q_out(CH_V_SOFT)         <= real_v_soft_q;
 
+                spikes_active(CH_TEMP_SOFT)     <= real_temp_soft_spk;
+                spikes_q_out(CH_TEMP_SOFT)      <= real_temp_soft_q;
+
+                spikes_active(CH_PROBE_SOFT)    <= real_probe_soft_spk;
+                spikes_q_out(CH_PROBE_SOFT)     <= real_probe_soft_q;
+
             --------------------------------------------------------------------
             -- Mode C (Default): Hybrid (Clock & Victim = REAL, Voltage = SYNTH)
             --------------------------------------------------------------------
@@ -140,6 +150,12 @@ begin
 
                 spikes_active(CH_V_SOFT)        <= real_v_soft_spk or synth_spikes(CH_V_SOFT);
                 spikes_q_out(CH_V_SOFT)         <= real_v_soft_q when real_v_soft_spk = '1' else synth_q(CH_V_SOFT);
+
+                spikes_active(CH_TEMP_SOFT)     <= real_temp_soft_spk or synth_spikes(CH_TEMP_SOFT);
+                spikes_q_out(CH_TEMP_SOFT)      <= real_temp_soft_q when real_temp_soft_spk = '1' else synth_q(CH_TEMP_SOFT);
+
+                spikes_active(CH_PROBE_SOFT)    <= real_probe_soft_spk or synth_spikes(CH_PROBE_SOFT);
+                spikes_q_out(CH_PROBE_SOFT)     <= real_probe_soft_q when real_probe_soft_spk = '1' else synth_q(CH_PROBE_SOFT);
         end case;
             end if;
         end if;

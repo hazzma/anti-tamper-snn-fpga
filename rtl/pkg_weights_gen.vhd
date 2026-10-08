@@ -44,8 +44,8 @@ package pkg_weights_gen is
             CH_JTAG_H        => to_signed(0, 8),
             CH_CLK_SOFT      => to_signed(50, 8),
             CH_V_SOFT        => to_signed(50, 8),
-            CH_SPARE_10      => to_signed(0, 8),
-            CH_SPARE_11      => to_signed(0, 8)
+            CH_TEMP_SOFT     => to_signed(50, 8), -- BTNL: Soft Thermal Anomaly (+50)
+            CH_PROBE_SOFT    => to_signed(10, 8)  -- BTNR: Capacitance Probing (+10 per hold tick)
         ),
 
         -- N2: COMBINED (Cross-channel & sustained anomaly detector, SCEN3)
@@ -60,8 +60,8 @@ package pkg_weights_gen is
             CH_JTAG_H        => to_signed(4, 8),
             CH_CLK_SOFT      => to_signed(12, 8),
             CH_V_SOFT        => to_signed(12, 8),
-            CH_SPARE_10      => to_signed(0, 8),
-            CH_SPARE_11      => to_signed(0, 8)
+            CH_TEMP_SOFT     => to_signed(12, 8),
+            CH_PROBE_SOFT    => to_signed(4, 8)
         ),
 
         -- N3: SPARE (Reserved / Inactive in MVP)

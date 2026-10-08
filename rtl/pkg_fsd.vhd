@@ -36,8 +36,10 @@ package pkg_fsd is
     constant CH_JTAG_H        : natural := 7;  -- Hard: BSCANE2 debug access
     constant CH_CLK_SOFT      : natural := 8;  -- Soft: clk dev > 1% (q=1..15)
     constant CH_V_SOFT        : natural := 9;  -- Soft: VCCINT dip > 9mV (q=1..15)
-    constant CH_SPARE_10      : natural := 10; -- Spare synth channel
-    constant CH_SPARE_11      : natural := 11; -- Spare synth channel
+    constant CH_TEMP_SOFT     : natural := 10; -- Soft: Thermal anomaly / Temperature spurt
+    constant CH_PROBE_SOFT    : natural := 11; -- Soft: Capacitance microprobing sensor
+    constant CH_SPARE_10      : natural := 10; -- Spare synth channel alias
+    constant CH_SPARE_11      : natural := 11; -- Spare synth channel alias
 
     ----------------------------------------------------------------------------
     -- Common Types for SNN Datapath
