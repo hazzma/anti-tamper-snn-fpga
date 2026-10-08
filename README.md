@@ -129,17 +129,20 @@ Tiga saklar paling kiri (`SW[15]`, `SW[14]`, `SW[13]`) didedikasikan secara inde
 
 ---
 
-### 📋 Cara Pengujian Super Simpel (Tanpa Pusing Biner)
+### 📋 Cara Pengujian Super Simpel (Intuisi "Ember Luber" SNN)
+
+Konsep utama: Tombol **`N17`** menuangkan air ($+\Delta V = 50$) ke ember membran neuron berkapasitas ambang batas $\Theta = 128$. Ember memiliki lubang kebocoran (*leak decay*) bertempo ~1.5–2 detik. Spike hanya terjadi saat ember **LUBER** ($V \ge 128$)!
 
 | Skenario Uji | Saklar Fisik | Tombol Eksekusi | Layar 7-Segment | Indikator LED & Efek Sistem |
 | :--- | :---: | :---: | :---: | :--- |
-| **1. Kondisi Awal (Normal Baseline)** | **Semua Saklar di BAWAH (`0`)** | *(Tidak ada)* | `S 0 0 0 0 0 A r` | Sistem aman bersenjata. `LED[0]` (H17) denyut 1 Hz. `LED[2]` (J13) menyala hijau. |
-| **2. Tes Glitch Tunggal (WARNING)** | Semua Saklar di BAWAH (`0`) | Tekan **`N17` (`BTNC`)** 1 kali | `S 1 0 0 8 0 A L` | Terdeteksi **1 SPIKE** $\rightarrow$ Status **WARNING / ALERT (`AL`)**! `LED[15]` (**WARNING**) MENYALA! |
-| **3. Spam Tombol N17 (GSR / ZEROIZE)** | Semua Saklar di BAWAH (`0`) | Tekan **`N17` (`BTNC`)** ke-2 kali / spam | `S 2 0 0 0 0 Z O` | Terdeteksi **2 SPIKE** $\rightarrow$ **GSR (Global Security Reset / ZEROIZE)!** `LED[14]` (**GSR/Bahaya**) MENYALA! Kunci kripto dimusnahkan total, data di-wipe bersih ke `0000`! |
-| **4. Serangan Probe (V10)** | Naikkan **`V10` (`SW[15]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0 0 0 0 Z O` | Rentetan 5 glitch diluncurkan. SNN meletup, memicu **GSR / Zeroize** seketika! |
-| **5. Serangan Ekstrem (U11)** | Naikkan **`U11` (`SW[14]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0 0 0 0 Z O` | Clock 200 MHz menyengat core, memicu mitigasi **GSR / Zeroize**! |
-| **6. Serangan Gabungan (U12)** | Naikkan **`U12` (`SW[13]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0 0 0 0 Z O` | Pemanas chip aktif + clock glitch memicu mitigasi **GSR / Zeroize**! |
-| **7. Reset Pemulihan Sistem** | Turunkan switch serangan ke bawah | Tekan **`CPU_RESETN` (`C12`)** *(Tombol Merah)* | `S 0 0 0 0 0 A r` | Alarm dibersihkan, memori di-reload, status kembali normal bersenjata. |
+| **1. Kondisi Awal (Normal Baseline)** | **Semua Saklar di BAWAH (`0`)** | *(Tidak ada)* | `S 0 0000 Ar` | Sistem aman bersenjata (*Armed*). `LED[0]` (H17) denyut 1 Hz. `LED[2]` (J13) & `LED[1]` (K15) menyala. |
+| **2. Uji 1x Klik (Surut Sendiri)** | Semua Saklar di BAWAH (`0`) | Tekan **`N17` (`BTNC`)** 1 kali | `S 0 0032 Ar` $\rightarrow$ `S 0 0000 Ar` | Tegangan naik $+50$ (hex `0032`), lalu surut perlahan dalam ~1.5 detik ke `0000`. **Tidak luber, tidak ada alarm.** |
+| **3. Spam 3x Cepat (Luber 1x $\rightarrow$ WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`N17`** 3 kali cepat | `S 1 0016 AL` | Akumulasi $50+50+50 = 150 \ge 128$ $\rightarrow$ **LUBER KE-1!** Reset subtraktif sisa `0016`. Status **WARNING (`AL`)**! `LED[15]` (**WARNING**) MENYALA! |
+| **4. Spam 3x Lagi (Luber 2x $\rightarrow$ GSR / ZEROIZE)** | Semua Saklar di BAWAH (`0`) | Spam **`N17`** 3 kali lagi | `S 2 0000 ZO` *(terbaca `20`)* | Akumulasi $22+150 = 172 \ge 128$ $\rightarrow$ **LUBER KE-2!** Ambang eskalasi tercapai $\rightarrow$ **GSR (ZEROIZE)!** `LED[14]` (**GSR / Merah**) MENYALA! Kunci kripto dimusnahkan total, memori di-wipe bersih ke `0000`! |
+| **5. Serangan Probe (V10)** | Naikkan **`V10` (`SW[15]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0000 ZO` | Rentetan 6 burst glitch membanjiri ember seketika $\rightarrow$ ember luber 2x $\rightarrow$ memicu **GSR / Zeroize** otomatis! |
+| **6. Serangan Ekstrem (U11)** | Naikkan **`U11` (`SW[14]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0000 ZO` | Overclock MMCM 200 MHz menyengat core, memicu mitigasi darurat **GSR / Zeroize**! |
+| **7. Serangan Gabungan (U12)** | Naikkan **`U12` (`SW[13]`)** ke atas | Otomatis (atau tekan `P18`) | `S 2 0000 ZO` | Pemanas chip aktif + clock glitch memicu mitigasi **GSR / Zeroize**! |
+| **8. Reset Pemulihan Sistem** | Turunkan switch serangan ke bawah | Tekan **`CPU_RESETN` (`C12`)** *(Tombol Merah)* | `S 0 0000 Ar` | Alarm dibersihkan, kunci kripto di-reload, status kembali normal bersenjata. |
 
 ---
 
