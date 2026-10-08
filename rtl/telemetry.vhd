@@ -25,9 +25,9 @@ entity telemetry is
         alert_status   : in  std_logic;
         zeroize_status : in  std_logic;
         active_class   : in  std_logic_vector(1 downto 0);
-        v_n1_membrane  : in  signed(15 downto 0);
-        spike_count    : in  unsigned(7 downto 0);
-        key_display    : in  std_logic_vector(15 downto 0);
+        v_n1_membrane   : in  signed(15 downto 0);
+        counter_display : in  unsigned(15 downto 0);
+        key_display     : in  std_logic_vector(15 downto 0);
         
         -- 7-Segment Display Outputs (Nexys A7-100T)
         seg_an         : out std_logic_vector(7 downto 0);
@@ -202,31 +202,15 @@ begin
                             cath_reg <= hex_to_7seg(key_display(3 downto 0));
                         end if;
 
-                    -- === 4 DIGIT KANAN (COUNTER & STATUS SNN) ===
+                    -- === 4 DIGIT KANAN (FULL 4-DIGIT EVENT / INCIDENT COUNTER) ===
                     when 3 =>
-                        cath_reg <= "1000110"; -- 'C' (Counter indicator)
+                        cath_reg <= hex_to_7seg(std_logic_vector(counter_display(15 downto 12)));
                     when 2 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(spike_count(3 downto 0)));
+                        cath_reg <= hex_to_7seg(std_logic_vector(counter_display(11 downto 8)));
                     when 1 =>
-                        if zeroize_status = '1' then
-                            cath_reg <= "0100100"; -- 'Z' (GSR / Zeroized)
-                        elsif alert_status = '1' then
-                            cath_reg <= "0001000"; -- 'A' (Warning / Alert)
-                        elsif arm_status = '1' then
-                            cath_reg <= "0001000"; -- 'A'
-                        else
-                            cath_reg <= "0101011"; -- 'n'
-                        end if;
+                        cath_reg <= hex_to_7seg(std_logic_vector(counter_display(7 downto 4)));
                     when others => -- digit 0
-                        if zeroize_status = '1' then
-                            cath_reg <= "1000000"; -- 'O' / '0'
-                        elsif alert_status = '1' then
-                            cath_reg <= "1000111"; -- 'L' (AL = Warning)
-                        elsif arm_status = '1' then
-                            cath_reg <= "0101111"; -- 'r' (Ar = Armed)
-                        else
-                            cath_reg <= "0101111"; -- 'r'
-                        end if;
+                        cath_reg <= hex_to_7seg(std_logic_vector(counter_display(3 downto 0)));
                 end case;
 
             end if;

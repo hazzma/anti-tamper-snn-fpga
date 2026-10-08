@@ -105,8 +105,9 @@ begin
                     -- Extreme Mode Memory Integrity Tamper (SW12 / H6): corrupt high word
                     key_primary(127 downto 112) <= x"DEAD";
                 elsif cosmic_flip_p = '1' then
-                    -- Manual Cosmic Ray Single Event Upset (BTND): flip 1 bit (0123 -> 0122)
+                    -- Manual Cosmic Ray Single Event Upset (BTND): flip 1 bit on display (0123 <-> 0122)
                     key_primary(112) <= not key_primary(112);
+                    key_shadow(112)  <= not key_shadow(112);
                 end if;
 
                 -- 32-bit LFSR Update

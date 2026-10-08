@@ -163,7 +163,7 @@ Seluruh pemetaan pin disesuaikan dengan file master XDC resmi Digilent Nexys A7-
 | **CPU_RESETN** (Tombol Merah) | `C12` | `CPU_RESETN` | **Master Hardware Reset** (Active-Low): Me-restore kunci AES ke `0123`, mereset membran SNN ke 0, me-reset counter ke 0, status kembali ke `0123 . C0Ar`. |
 | **BTNC** (Center / Tengah) | `N17` | `BTNC` | **Manual Soft Clock Glitch (+50 ke Leaky Bucket SNN)**:<br>• 1x Tekan: Menambah muatan $+50$ ke membran SNN ($\Theta=128$), ember tidak luber, surut sendiri dalam ~1.5 detik.<br>• 3x Tekan Cepat: Akumulasi $3 \times 50 = 150 \ge 128 \implies$ SNN Luber ke-1 $\rightarrow$ Status **Warning (`C1AL`)**, `LED[15]` ON!<br>• 6x Tekan Cepat: SNN Luber ke-2 $\rightarrow$ **GSR Zeroize (`0000 . C2ZO`)**, `LED[14]` ON, Kunci di-wipe ke `0000`! |
 | **BTND** (Down / Bawah) | `P18` | `BTND` | **Memory Integrity / Cosmic Ray Single-Event Upset (SEU)**:<br>• 1x Tekan: Membalik 1 bit pada kunci kripto (`0123` $\rightarrow$ `0122`) dan menyuntik 1 soft spike ke SNN. Dianggap sebagai radiasi cosmic ray alami tanpa memicu alarm (`0122 . C0Ar`).<br>• Spam Beruntun: SNN mendeteksi anomali bertubi-tubi (fault attack aktif), membran meluap $\rightarrow$ memicu Warning (`C1AL`) hingga GSR Zeroize (`0000 . C2ZO`)! |
-| **BTNU** (Up / Atas) | `M18` | `BTNU` | **Manual Soft Frequency Jitter**: Menyuntik pulsa jitter halus (+50 ke Leaky Bucket SNN). |
+| **BTNU** (Up / Atas) | `M18` | `BTNU` | **Manual Soft Voltage Drop (+50 ke Leaky Bucket SNN)**:<br>• Menyuntik pulsa drop tegangan halus (+50 muatan air) ke saluran `CH_V_SOFT`. 1x klik surut dalam ~1.5 detik. Spam 3x cepat memicu Warning (Kuning), 6x memicu GSR Zeroize (Merah)! |
 
 ---
 
@@ -189,16 +189,17 @@ Empat switch paling kiri (`SW[15:12]`) adalah **Mode Serangan Ekstrem** yang lan
 
 | Skenario Uji | Saklar Fisik | Tombol Eksekusi | Layar 7-Segment | Indikator LED & Efek Sistem |
 | :--- | :---: | :---: | :---: | :--- |
-| **1. Normal Armed (Boot Awal)** | Semua Saklar di BAWAH (`0`) | *(Tidak ada)* | `0123 . C0Ar` | Normal Armed. Prefix kunci `0123`, counter 0, status Armed (`Ar`). `LED[0]` denyut 1 Hz, `LED[1]` & `LED[2]` ON. |
-| **2. Cosmic Ray Test (1x BTND)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTND` (`P18`)** 1 kali | `0122 . C0Ar` | Bit kunci terbalik (`0123` $\rightarrow$ `0122`). SNN menganggap anomali kecil alami (surut sendiri). **Tidak ada alarm.** |
-| **3. Soft Glitch 1x (BTNC)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTNC` (`N17`)** 1 kali | `0123 . C0Ar` | Membran SNN naik $+50$, tidak luber ($\Theta=128$), surut perlahan ke 0 dalam ~1.5 detik. **Aman.** |
-| **4. Spam 3x BTNC/BTND (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`BTNC` / `BTND`** 3 kali cepat | `0123 . C1AL` | Membran meluap ($150 \ge 128$) $\rightarrow$ Counter naik ke 1! Status **WARNING (`AL`)**! `LED[15]` MENYALA! |
-| **5. Spam Lanjutan (GSR ZEROIZE)** | Semua Saklar di BAWAH (`0`) | Spam 3 kali lagi | `0000 . C2ZO` | Counter naik ke 2 ($\ge$ Ambang Eskalasi) $\rightarrow$ **GSR ZEROIZE!** Kunci dihapus total menjadi `0000`. `LED[14]` (Bahaya) MENYALA! |
-| **6. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . C2ZO` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap menjadi `0000`, terkunci di status `C2ZO`. |
-| **7. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . C2ZO` | Layer 1 Hard Trip instan! Terkunci di status `0000 . C2ZO`. |
-| **8. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . C2ZO` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap, terkunci di status `0000 . C2ZO`. |
-| **9. Extreme Memory Tamper (H6)** | Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . C2ZO` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total, terkunci di status `0000 . C2ZO`. |
-| **10. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . C0Ar` | Kunci dipulihkan kembali ke `0123`, counter di-reset ke 0, status kembali normal bersenjata (`C0Ar`). |
+| **1. Normal Armed (Boot Awal)** | Semua Saklar di BAWAH (`0`) | *(Tidak ada)* | `0123 . 0000` | Normal Armed. Kunci `0123`, counter `0000`. RGB LED menyala **HIJAU** (`LED16` & `LED17`). `LED[0]` denyut 1 Hz. |
+| **2. Cosmic Ray Test (1x BTND)** | Semua Saklar di BAWAH (`0`) | Tekan **`BTND` (`P18`)** 1 kali | `0122 . 0001` | Bit kunci terbalik (`0123` $\rightarrow$ `0122`), counter naik `0001`. SNN menganggap anomali alami (surut sendiri). **RGB tetap HIJAU, tidak ada alarm.** |
+| **3. Soft Clock Glitch (1x BTNC)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNC` (`N17`)** 1 kali | `0123 . 0002` | Muatan clock $+50$ masuk ke SNN ($\Theta=128$), counter `0002`. Surut dalam ~1.5 detik. **RGB tetap HIJAU.** |
+| **4. Soft Voltage Drop (1x BTNU)**| Semua Saklar di BAWAH (`0`) | Tekan **`BTNU` (`M18`)** 1 kali | `0123 . 0003` | Muatan voltage $+50$ masuk ke SNN, counter `0003`. Surut dalam ~1.5 detik. **RGB tetap HIJAU.** |
+| **5. Spam 3x Cepat (WARNING)** | Semua Saklar di BAWAH (`0`) | Spam **`BTNC` / `BTNU` / `BTND`** 3x cepat | `0123 . 0006` | Akumulasi $150 \ge 128 \implies$ SNN ember luber ke-1! RGB LED seketika berubah **KUNING** (Alert)! `LED[15]` ON! |
+| **6. Spam Lanjutan (GSR ZEROIZE)**| Semua Saklar di BAWAH (`0`) | Spam 3x cepat lagi | `0000 . 0009` | SNN luber ke-2 $\rightarrow$ **GSR ZEROIZE!** Kunci dihapus total menjadi `0000`. RGB LED berubah **MERAH** (Bahaya)! `LED[14]` ON! |
+| **7. Extreme Clock Trip (V10)** | Naikkan **`V10` (`SW[15]`)** | *(Instan)* | `0000 . 000A` | Bypass SNN $\rightarrow$ Layer 1 Hard Trip instan! Kunci seketika lenyap jadi `0000`, RGB **MERAH**, `LED[14]` ON! |
+| **8. Extreme Voltage Trip (U11)** | Naikkan **`U11` (`SW[14]`)** | *(Instan)* | `0000 . 000B` | Layer 1 Hard Trip instan! Kunci lenyap jadi `0000`, RGB **MERAH**! |
+| **9. Extreme Thermal Trip (U12)** | Naikkan **`U12` (`SW[13]`)** | *(Instan)* | `0000 . 000C` | Layer 1 Hard Trip instan! Pemanas aktif, kunci lenyap jadi `0000`, RGB **MERAH**! |
+| **10. Extreme Memory Tamper (H6)**| Naikkan **`H6` (`SW[12]`)** | *(Instan)* | `0000 . 000D` | Memori kunci dirusak & Layer 1 Hard Trip instan $\rightarrow$ Kunci musnah total jadi `0000`, RGB **MERAH**! |
+| **11. Master Reset** | Turunkan switch ekstrem ke bawah | Tekan **`CPU_RESETN` (`C12`)** | `0123 . 0000` | Kunci dipulihkan ke `0123`, counter di-reset ke `0000`, RGB LED kembali **HIJAU**! |
 
 ---
 
@@ -223,16 +224,26 @@ Display 8 digit 7-segment pada Nexys A7 dibagi menjadi 2 zona yang dipisahkan ol
 ```text
  +-------+-------+-------+-------+       +-------+-------+-------+-------+
  |  AN7  |  AN6  |  AN5  |  AN4  |   .   |  AN3  |  AN2  |  AN1  |  AN0  |
- |        KEY DISPLAY (4 DIGIT)   |   DP  |      COUNTER & STATUS (4 DIGIT)|
- |  [0123] Normal / [0000] Wiped | [ON]  |  [C]  | COUNT | [Ar / AL / ZO] |
+ |        KEY DISPLAY (4 DIGIT)   |   DP  |        EVENT COUNTER (4 DIGIT)|
+ |  [0123] Normal / [0000] Wiped | [ON]  |  [0]  |  [0]  |  [0]  |  [0]  |
  +-------+-------+-------+-------+       +-------+-------+-------+-------+
 ```
 
 | Zona Display | Digit | Tampilan | Arti & Maknanya |
 | :--- | :---: | :---: | :--- |
-| **Zona Kiri (Kunci AES)** | **`AN[7:4]`** | **`0123`** atau **`0000`** | **Prefix Kunci Kriptografi AES**:<br>• Normal: Menampilkan hex **`0123`**.<br>• Cosmic Ray (1x BTND): Menampilkan **`0122`** (1 bit terbalik).<br>• **GSR / Zeroize**: Menampilkan **`0000`** (kunci terhapus bersih dari hardware)! |
+| **Zona Kiri (Kunci AES)** | **`AN[7:4]`** | **`0123`** atau **`0000`** | **Prefix Kunci Kriptografi AES**:<br>• Normal: Menampilkan hex **`0123`**.<br>• Cosmic Ray (1x BTND): Menampilkan **`0122`** (1 bit terbalik pada memori kunci).<br>• **GSR / Zeroize**: Menampilkan **`0000`** (kunci terhapus bersih dari hardware)! |
 | **Pemisah Desimal** | **`DP` (Digit 4)** | **`.` (Menyala)** | **Decimal Point** aktif di digit 4 sebagai pemisah visual antara Kunci dan Counter. |
-| **Zona Kanan (Counter & Status)** | **`AN[3:0]`** | **`C 0 Ar`** / **`C 1 AL`** / **`C 2 ZO`** | **Format: `C <count> <Status>`**:<br>• **`C0Ar`**: Count 0, Status **Armed** (Normal)<br>• **`C1AL`**: Count 1, Status **Alert / Warning** (SNN Mendeteksi Anomali)<br>• **`C2ZO`**: Count 2, Status **GSR Zeroize** (Kunci Musnah & Sistem Terkunci)! |
+| **Zona Kanan (Event Counter)** | **`AN[3:0]`** | **`0000` s.d. `FFFF`** | **Full 4-Digit Incident Counter**:<br>• Menampilkan jumlah event/klik tombol serangan dan switch ekstrem.<br>• Setiap klik bertambah 1 (`0000` $\rightarrow$ `0001` $\rightarrow$ `0002` ...).<br>• Reset ke `0000` saat tombol `CPU_RESETN` ditekan. |
+
+### 💡 Indikator Status via Multi-Color RGB LEDs (`LED16` & `LED17`)
+
+Status keamanan sistem tidak lagi memakan digit 7-segment, melainkan dialihkan sepenuhnya ke dua LED RGB multi-warna Nexys A7:
+
+| Warna RGB LED | State Keamanan | Arti & Kondisi Sistem |
+| :---: | :---: | :--- |
+| 🟢 **HIJAU** | **ARMED / NORMAL** | Sistem aman siaga tinggi, tidak ada anomali atau muatan telah surut kembali ke 0. |
+| 🟡 **KUNING** | **WARNING / ALERT** | SNN mendeteksi anomali berulang (ember membran $\ge 128$ luber ke-1, counter alert = 1). |
+| 🔴 **MERAH** | **GSR ZEROIZED** | Serangan terkonfirmasi/mode ekstrem aktif! Kunci AES musnah (`0000`), sistem terlockout. |
 
 ---
 

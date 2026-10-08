@@ -24,6 +24,14 @@ entity top is
         BTND          : in  std_logic;
         LED           : out std_logic_vector(15 downto 0);
         
+        -- Multi-Color RGB LEDs (LD16, LD17)
+        LED16_R       : out std_logic;
+        LED16_G       : out std_logic;
+        LED16_B       : out std_logic;
+        LED17_R       : out std_logic;
+        LED17_G       : out std_logic;
+        LED17_B       : out std_logic;
+        
         -- 7-Segment Display
         AN            : out std_logic_vector(7 downto 0);
         SEG           : out std_logic_vector(6 downto 0);
@@ -146,6 +154,7 @@ architecture rtl of top is
     signal sw_extreme_trip    : std_logic := '0';
     signal seq_manual_spk     : std_logic := '0';
     signal arm_active         : std_logic := '1';
+    signal event_counter      : unsigned(15 downto 0) := (others => '0');
 
     -- Switch-gated Monitor Flags (SW(0) = Monitor Bypass / Disarm)
     signal g_clk_fast_h       : std_logic;
@@ -216,12 +225,19 @@ begin
     g_mmcm_unlock_h <= mmcm_unlock_h and (not SW(0));
     g_v_under_h     <= v_under_h and (not SW(0));
     g_v_over_h      <= v_over_h and (not SW(0));
-    g_clk_soft_spk  <= (clk_soft_spk and (not SW(0))) or seq_manual_spk;
-    g_clk_soft_q    <= to_unsigned(1, 4) when seq_manual_spk = '1' else
+    -- Manual Soft Pulses to SNN Leaky Bucket (+50 water per click):
+    -- BTNC (N17): Soft Clock Glitch -> CH_CLK_SOFT
+    -- BTND (P18): Memory Cosmic Ray -> CH_CLK_SOFT
+    -- BTNU (M18): Soft Voltage Drop -> CH_V_SOFT
+    g_clk_soft_spk  <= (clk_soft_spk and (not SW(0))) or btnc_pulse or btnd_pulse;
+    g_clk_soft_q    <= to_unsigned(1, 4) when (btnc_pulse = '1' or btnd_pulse = '1') else
                        clk_soft_q when SW(0) = '0' else
                        (others => '0');
-    g_v_soft_spk    <= v_soft_spk and (not SW(0));
-    g_v_soft_q      <= v_soft_q when SW(0) = '0' else (others => '0');
+
+    g_v_soft_spk    <= (v_soft_spk and (not SW(0))) or btnu_pulse;
+    g_v_soft_q      <= to_unsigned(1, 4) when btnu_pulse = '1' else
+                       v_soft_q when SW(0) = '0' else
+                       (others => '0');
 
     -- Extreme Switch Trip Generation:
     -- SW15 (V10): Extreme Clock Fault
@@ -265,6 +281,7 @@ begin
                 sw12_edge      <= '0';
                 seq_manual_spk <= '0';
                 cosmic_toggle  <= '0';
+                event_counter  <= (others => '0');
             else
                 btnc_d1    <= BTNC; btnc_d2 <= btnc_d1;
                 btnc_pulse <= btnc_d1 and not btnc_d2;
@@ -292,11 +309,13 @@ begin
                     cosmic_toggle <= not cosmic_toggle;
                 end if;
 
-                -- Manual soft pulse into SNN Leaky Bucket (+50 water per click):
-                -- BTNC: Soft Clock Glitch
-                -- BTND: Cosmic Ray SEU
-                -- BTNU: Soft Frequency Jitter
                 seq_manual_spk <= btnc_pulse or btnd_pulse or btnu_pulse;
+
+                -- 4-Digit incident counter: increments on each button click or extreme switch edge
+                if (btnc_pulse = '1' or btnu_pulse = '1' or btnd_pulse = '1' or
+                    sw15_edge = '1' or sw14_edge = '1' or sw13_edge = '1' or sw12_edge = '1') then
+                    event_counter <= event_counter + 1;
+                end if;
             end if;
         end if;
     end process p_hw_seq;
@@ -509,21 +528,64 @@ begin
     ----------------------------------------------------------------------------
     u_telemetry : entity work.telemetry
         port map (
-            clk100         => clk100,
-            rstn           => rstn,
-            leak_tick_out  => leak_tick,
-            heartbeat_led  => heartbeat_led,
-            arm_status     => arm_active,
-            alert_status   => is_alert,
-            zeroize_status => is_zeroized or v_zeroized,
-            active_class   => active_class,
-            v_n1_membrane  => v_membranes(1),
-            spike_count    => alert_cnt_out,
-            key_display    => key_disp_val,
-            seg_an         => AN,
-            seg_cath       => SEG,
-            seg_dp         => DP
+            clk100          => clk100,
+            rstn            => rstn,
+            leak_tick_out   => leak_tick,
+            heartbeat_led   => heartbeat_led,
+            arm_status      => arm_active,
+            alert_status    => is_alert,
+            zeroize_status  => is_zeroized or v_zeroized,
+            active_class    => active_class,
+            v_n1_membrane   => v_membranes(1),
+            counter_display => event_counter,
+            key_display     => key_disp_val,
+            seg_an          => AN,
+            seg_cath        => SEG,
+            seg_dp          => DP
         );
+
+    ----------------------------------------------------------------------------
+    -- Multi-Color RGB LEDs (LD16 & LD17) Security State Indication
+    ----------------------------------------------------------------------------
+    -- Normal Armed: Solid GREEN
+    -- Warning / Alert: Bright YELLOW (Red + Green)
+    -- GSR Zeroized: Solid RED (Hazard / Keys Wiped)
+    p_rgb : process(is_zeroized, v_zeroized, is_alert, arm_active)
+    begin
+        if (is_zeroized = '1' or v_zeroized = '1') then
+            -- RED (GSR Zeroize Active)
+            LED16_R <= '1';
+            LED16_G <= '0';
+            LED16_B <= '0';
+            LED17_R <= '1';
+            LED17_G <= '0';
+            LED17_B <= '0';
+        elsif is_alert = '1' then
+            -- YELLOW (Warning / Alert)
+            LED16_R <= '1';
+            LED16_G <= '1';
+            LED16_B <= '0';
+            LED17_R <= '1';
+            LED17_G <= '1';
+            LED17_B <= '0';
+        elsif arm_active = '1' then
+            -- GREEN (Normal Armed)
+            LED16_R <= '0';
+            LED16_G <= '1';
+            LED16_B <= '0';
+            LED17_R <= '0';
+            LED17_G <= '1';
+            LED17_B <= '0';
+        else
+            -- BLUE (Disarmed)
+            LED16_R <= '0';
+            LED16_G <= '0';
+            LED16_B <= '1';
+            LED17_R <= '0';
+            LED17_G <= '0';
+            LED17_B <= '1';
+        end if;
+    end process p_rgb;
 
     ----------------------------------------------------------------------------
     -- Output LED Status Mapping (FSD v2 §10)
@@ -540,8 +602,8 @@ begin
     LED(9)  <= snn_fires(2); -- N2 Fire
     LED(10) <= snn_fires(3);
     LED(11) <= glitch_act;
-    LED(12) <= SW(12);                                     -- Extreme Memory Tamper Switch (H6)
-    LED(13) <= SW(13);                                     -- Extreme Stress Switch (U12)
+    LED(12) <= '0';                                        -- LED 12 (Pin V15 idle)
+    LED(13) <= '0';                                        -- LED 13 (Pin V14 idle)
     LED(14) <= is_zeroized or v_zeroized;                  -- GSR ACTIVE (LED14 ON, Red Hazard)
     LED(15) <= is_alert and not (is_zeroized or v_zeroized); -- WARNING ACTIVE (LED15 ON only when 1 spike warning)
 
