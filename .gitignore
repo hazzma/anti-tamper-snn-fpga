@@ -1,0 +1,29 @@
+# Vivado temporary and run files
+.Xil/
+vivado_sim/
+vivado_output_snn/
+*.jou
+*.log
+*.str
+*.dcp
+*.wdb
+*.vcd
+dfx_runtime.txt
+*.backup.*
+
+# Vivado project generated directories (keep .xpr)
+vivado_project/.Xil/
+vivado_project/*.cache/
+vivado_project/*.hw/
+vivado_project/*.ip_user_files/
+vivado_project/*.runs/
+vivado_project/*.sim/
+vivado_project/*.jou
+vivado_project/*.log
+vivado_project/*.str
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
