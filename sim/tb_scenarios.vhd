@@ -3,6 +3,13 @@
 -- Description: Comprehensive Self-Checking Verification Testbench implementing
 --              all 16 scenarios defined in tb_scenarios.md (Scenarios A, B, C, D, F)
 --
+-- Exposes intuitive Physical Controls & Indicators:
+--   - 4 Physical Switches (SW15..SW12): Extreme Threshold Tamper (Layer 1)
+--   - 4 Physical Buttons (BTNC, BTNU, BTNL, BTNR): Soft Perturbation Injections
+--   - Master Key (16-bit display): 0x0123 (Intact) -> 0x0000 (Zeroized)
+--   - SNN Potential Count & Escalation Counter
+--   - Warning LED & Zeroized Lockdown LED
+--
 -- Coverage:
 --   Scenario A (Conventional Threshold Detection):
 --     TB-01: Normal operation               -> No action
@@ -51,6 +58,34 @@ architecture sim of tb_scenarios is
     signal rstn          : std_logic := '0';
     signal sim_done      : boolean   := false;
 
+    -- =========================================================================
+    -- Physical Board Controls & Indicators (for Proposal & Verification Waves)
+    -- =========================================================================
+    -- 4 Physical Switches (Layer 1 Instant Hard Threshold Attacks)
+    signal sw_extreme_clk     : std_logic := '0'; -- SW[3] / SW15: Extreme Clock Glitch
+    signal sw_extreme_volt    : std_logic := '0'; -- SW[2] / SW14: Extreme Voltage Drop/Surge
+    signal sw_extreme_temp    : std_logic := '0'; -- SW[1] / SW13: Extreme Temperature Spike
+    signal sw_extreme_mem     : std_logic := '0'; -- SW[0] / SW12: Memory Integrity Tamper
+    signal sw                 : std_logic_vector(3 downto 0) := "0000"; -- Bus representation (SW3..SW0)
+
+    -- 4 Physical Buttons (Layer 2 Gray-Zone / SNN Soft Perturbation Injections)
+    signal btnc_clk_glitch    : std_logic := '0'; -- BTNC: Soft Clock Jitter/Glitch (+50)
+    signal btnu_volt_drop     : std_logic := '0'; -- BTNU: Soft Voltage Dip (+50)
+    signal btnl_temp_anomaly  : std_logic := '0'; -- BTNL: Soft Thermal Anomaly (+50)
+    signal btnr_probe_cap     : std_logic := '0'; -- BTNR: Soft Laser / EM Probe (+10)
+    signal btn                : std_logic_vector(3 downto 0) := "0000"; -- Bus representation (BTNC..BTNR)
+
+    -- Cryptographic Asset Key
+    signal key_disp           : std_logic_vector(15 downto 0); -- Master Key: 0x0123 (Intact) -> 0x0000 (Zeroized)
+
+    -- SNN Internal Counters
+    signal snn_count          : signed(15 downto 0) := (others => '0'); -- SNN Membrane Potential (Count / Potential V)
+    signal snn_spike_count    : unsigned(7 downto 0) := (others => '0'); -- Escalation Spike Count (0=Normal, 1=Warning, 2=Zeroize)
+
+    -- Status & Warning LEDs
+    signal led_warning        : std_logic := '0'; -- Yellow Warning LED (Latched after 1st Gray-Zone Spike)
+    signal led_zeroized       : std_logic := '0'; -- Red Zeroized LED (Hard Lockdown Active)
+
     -- Sensor MUX Physical/Internal Simulation Inputs
     signal real_clk_fast_h      : std_logic := '0';
     signal real_clk_slow_h      : std_logic := '0';
@@ -93,17 +128,23 @@ architecture sim of tb_scenarios is
     signal class_out            : std_logic_vector(1 downto 0);
     signal latency_cycles       : unsigned(31 downto 0);
     signal led_alert            : std_logic;
-    signal led_zeroized         : std_logic;
 
     -- Victim Cryptographic Asset Core
-    signal key_disp             : std_logic_vector(15 downto 0);
     signal core_zeroized        : std_logic;
     signal cosmic_flip_p        : std_logic := '0';
     signal corrupt_inject_h     : std_logic := '0';
     signal key_corrupt_out      : std_logic;
 
-    -- Component wiring complete, process begins below
 begin
+
+    ----------------------------------------------------------------------------
+    -- Board Controls and Indicators Continuous Concurrent Mapping
+    ----------------------------------------------------------------------------
+    sw              <= sw_extreme_clk & sw_extreme_volt & sw_extreme_temp & sw_extreme_mem;
+    btn             <= btnc_clk_glitch & btnu_volt_drop & btnl_temp_anomaly & btnr_probe_cap;
+    snn_count       <= snn_v_mem(1);
+    snn_spike_count <= alert_count_out;
+    led_warning     <= alert_latched;
 
     ----------------------------------------------------------------------------
     -- 100 MHz System Clock Generator
@@ -223,7 +264,7 @@ begin
         variable pass_count : integer := 0;
         variable fail_count : integer := 0;
 
-        -- Helper procedure to pulse a clock cycle
+        -- Helper procedure to pulse clock cycles
         procedure wait_cycles(constant n : in integer) is
         begin
             for i in 1 to n loop
@@ -237,6 +278,14 @@ begin
         begin
             -- Assert Reset
             rstn <= '0';
+            sw_extreme_clk     <= '0';
+            sw_extreme_volt    <= '0';
+            sw_extreme_temp    <= '0';
+            sw_extreme_mem     <= '0';
+            btnc_clk_glitch    <= '0';
+            btnu_volt_drop     <= '0';
+            btnl_temp_anomaly  <= '0';
+            btnr_probe_cap     <= '0';
             real_clk_fast_h    <= '0';
             real_clk_slow_h    <= '0';
             real_clk_stop_h    <= '0';
@@ -292,9 +341,14 @@ begin
 
         -- TB-02: Extreme voltage -> Key clear
         reset_system;
-        real_v_under_h <= '1';
-        hard_alert_l1  <= '1';
+        sw_extreme_volt <= '1';
+        real_v_under_h  <= '1';
+        hard_alert_l1   <= '1';
         wait_cycles(3);
+        sw_extreme_volt <= '0';
+        real_v_under_h  <= '0';
+        hard_alert_l1   <= '0';
+        wait_cycles(2);
         assert (zeroized_latched = '1') and (key_disp = x"0000")
             report "TB-02 FAILED: Extreme voltage did not trigger immediate key clear!" severity failure;
         report " [PASS] TB-02: Extreme voltage verified (Key cleared to 0000 instantly)" severity note;
@@ -302,8 +356,12 @@ begin
 
         -- TB-03: Extreme temperature -> Key clear
         reset_system;
-        hard_alert_l1 <= '1'; -- Simulated thermal breaker trip
+        sw_extreme_temp <= '1';
+        hard_alert_l1   <= '1'; -- Simulated thermal breaker trip
         wait_cycles(3);
+        sw_extreme_temp <= '0';
+        hard_alert_l1   <= '0';
+        wait_cycles(2);
         assert (zeroized_latched = '1') and (key_disp = x"0000")
             report "TB-03 FAILED: Extreme temperature did not trigger immediate key clear!" severity failure;
         report " [PASS] TB-03: Extreme temperature verified (Key cleared to 0000 instantly)" severity note;
@@ -311,9 +369,14 @@ begin
 
         -- TB-04: Extreme clock -> Key clear
         reset_system;
+        sw_extreme_clk  <= '1';
         real_clk_fast_h <= '1';
         hard_alert_l1   <= '1';
         wait_cycles(3);
+        sw_extreme_clk  <= '0';
+        real_clk_fast_h <= '0';
+        hard_alert_l1   <= '0';
+        wait_cycles(2);
         assert (zeroized_latched = '1') and (key_disp = x"0000")
             report "TB-04 FAILED: Extreme clock glitch did not trigger immediate key clear!" severity failure;
         report " [PASS] TB-04: Extreme clock verified (Key cleared to 0000 instantly)" severity note;
@@ -321,12 +384,16 @@ begin
 
         -- TB-05: Extreme memory integrity -> Key clear
         reset_system;
+        sw_extreme_mem   <= '1';
         corrupt_inject_h <= '1';
         wait_cycles(1);
         hard_alert_l1    <= key_corrupt_out;
         wait_cycles(1);
         corrupt_inject_h <= '0';
         wait_cycles(3);
+        sw_extreme_mem   <= '0';
+        hard_alert_l1    <= '0';
+        wait_cycles(2);
         assert (zeroized_latched = '1') and (key_disp = x"0000")
             report "TB-05 FAILED: Memory integrity tamper did not trigger immediate key clear!" severity failure;
         report " [PASS] TB-05: Extreme memory integrity verified (Key cleared to 0000 instantly)" severity note;
@@ -341,9 +408,11 @@ begin
 
         -- TB-06: Single gray event -> snn_spike = 0, no action
         reset_system;
+        btnc_clk_glitch   <= '1';
         real_clk_soft_spk <= '1';
         real_clk_soft_q   <= to_unsigned(1, 4); -- 1x pulse (+50 weight)
         wait_cycles(1);
+        btnc_clk_glitch   <= '0';
         real_clk_soft_spk <= '0';
         wait_cycles(4);
         assert (alert_count_out = 0) and (alert_latched = '0') and (zeroized_latched = '0') and (snn_v_mem(1) = 50)
@@ -354,9 +423,11 @@ begin
         -- TB-07: Parameter yang sama diulang -> snn_spike = 1, warning LED
         -- Inject 2 more pulses (+50 + 50 => Total 150 >= 128)
         for i in 1 to 2 loop
+            btnc_clk_glitch   <= '1';
             real_clk_soft_spk <= '1';
             real_clk_soft_q   <= to_unsigned(1, 4);
             wait_cycles(1);
+            btnc_clk_glitch   <= '0';
             real_clk_soft_spk <= '0';
             wait_cycles(3);
         end loop;
@@ -369,9 +440,11 @@ begin
         -- Subtractive reset leaves V = 150 - 128 = 22.
         -- Inject 3 more pulses (+50 x 3 = +150 => 22 + 150 = 172 >= 128)
         for i in 1 to 3 loop
+            btnc_clk_glitch   <= '1';
             real_clk_soft_spk <= '1';
             real_clk_soft_q   <= to_unsigned(1, 4);
             wait_cycles(1);
+            btnc_clk_glitch   <= '0';
             real_clk_soft_spk <= '0';
             wait_cycles(3);
         end loop;
@@ -391,14 +464,18 @@ begin
         -- TB-09: Two gray events (2 parameter weight kecil) -> snn_spike = 0, no action
         reset_system;
         -- CH_PROBE_SOFT (w=10) + small pulse
+        btnr_probe_cap      <= '1';
         real_probe_soft_spk <= '1';
         real_probe_soft_q   <= to_unsigned(1, 4);
         wait_cycles(1);
+        btnr_probe_cap      <= '0';
         real_probe_soft_spk <= '0';
         wait_cycles(3);
+        btnr_probe_cap      <= '1';
         real_probe_soft_spk <= '1';
         real_probe_soft_q   <= to_unsigned(1, 4);
         wait_cycles(1);
+        btnr_probe_cap      <= '0';
         real_probe_soft_spk <= '0';
         wait_cycles(4);
         assert (alert_count_out = 0) and (alert_latched = '0') and (snn_v_mem(1) = 20)
@@ -409,11 +486,15 @@ begin
         -- TB-10: Two gray events (2 parameter weight besar) -> snn_spike = 1, warning LED
         reset_system;
         -- CH_CLK_SOFT (w=50, q=1) + CH_V_SOFT (w=50, q=2) => 50 + 100 = 150 >= 128
+        btnc_clk_glitch   <= '1';
+        btnu_volt_drop    <= '1';
         real_clk_soft_spk <= '1';
         real_clk_soft_q   <= to_unsigned(1, 4);
         real_v_soft_spk   <= '1';
         real_v_soft_q     <= to_unsigned(2, 4);
         wait_cycles(1);
+        btnc_clk_glitch   <= '0';
+        btnu_volt_drop    <= '0';
         real_clk_soft_spk <= '0';
         real_v_soft_spk   <= '0';
         wait_cycles(4);
@@ -426,9 +507,11 @@ begin
         reset_system;
         -- Inject 14 pairs of probe pulses (+10 each => 20 per pair => 140 each burst => 2 spikes)
         for pair in 1 to 14 loop
+            btnr_probe_cap      <= '1';
             real_probe_soft_spk <= '1';
             real_probe_soft_q   <= to_unsigned(2, 4); -- 2 x 10 = +20 per tick
             wait_cycles(1);
+            btnr_probe_cap      <= '0';
             real_probe_soft_spk <= '0';
             wait_cycles(2);
         end loop;
@@ -442,11 +525,15 @@ begin
         reset_system;
         -- Burst 1: CLK_SOFT (w=50) + V_SOFT (w=50) => 100 + 100 = 200 >= 128 => Spike 1
         for burst in 1 to 2 loop
+            btnc_clk_glitch   <= '1';
+            btnu_volt_drop    <= '1';
             real_clk_soft_spk <= '1';
             real_clk_soft_q   <= to_unsigned(1, 4);
             real_v_soft_spk   <= '1';
             real_v_soft_q     <= to_unsigned(1, 4);
             wait_cycles(1);
+            btnc_clk_glitch   <= '0';
+            btnu_volt_drop    <= '0';
             real_clk_soft_spk <= '0';
             real_v_soft_spk   <= '0';
             wait_cycles(2);
@@ -456,11 +543,15 @@ begin
             report "TB-12 Check 1 FAILED: Expected Spike 1 after burst 1!" severity failure;
         -- Burst 2: repeat CLK_SOFT + V_SOFT => Spike 2
         for burst in 1 to 2 loop
+            btnc_clk_glitch   <= '1';
+            btnu_volt_drop    <= '1';
             real_clk_soft_spk <= '1';
             real_clk_soft_q   <= to_unsigned(1, 4);
             real_v_soft_spk   <= '1';
             real_v_soft_q     <= to_unsigned(1, 4);
             wait_cycles(1);
+            btnc_clk_glitch   <= '0';
+            btnu_volt_drop    <= '0';
             real_clk_soft_spk <= '0';
             real_v_soft_spk   <= '0';
             wait_cycles(2);
@@ -482,25 +573,25 @@ begin
         reset_system;
         -- Simultaneous Clock (50) + Voltage (50) + Temperature (50) = 150 >= 128
         -- Event 1: 150 >= 128 -> Spike 1 (V_reset = 22)
-        real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
-        real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
-        real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
+        btnc_clk_glitch    <= '1'; real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
+        btnu_volt_drop     <= '1'; real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
+        btnl_temp_anomaly  <= '1'; real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
         wait_cycles(1);
-        real_clk_soft_spk  <= '0';
-        real_v_soft_spk    <= '0';
-        real_temp_soft_spk <= '0';
+        btnc_clk_glitch    <= '0'; real_clk_soft_spk  <= '0';
+        btnu_volt_drop     <= '0'; real_v_soft_spk    <= '0';
+        btnl_temp_anomaly  <= '0'; real_temp_soft_spk <= '0';
         wait_cycles(4);
         assert (alert_count_out = 1)
             report "TB-13 Check 1 FAILED: Expected Spike 1 on 3-parameter combination!" severity failure;
 
         -- Event 2: 22 + 150 = 172 >= 128 -> Spike 2 -> Key Clear
-        real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
-        real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
-        real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
+        btnc_clk_glitch    <= '1'; real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
+        btnu_volt_drop     <= '1'; real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
+        btnl_temp_anomaly  <= '1'; real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
         wait_cycles(1);
-        real_clk_soft_spk  <= '0';
-        real_v_soft_spk    <= '0';
-        real_temp_soft_spk <= '0';
+        btnc_clk_glitch    <= '0'; real_clk_soft_spk  <= '0';
+        btnu_volt_drop     <= '0'; real_v_soft_spk    <= '0';
+        btnl_temp_anomaly  <= '0'; real_temp_soft_spk <= '0';
         wait_cycles(5);
         assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
             report "TB-13 FAILED: 3-parameter pattern did not escalate to key clear!" severity failure;
@@ -511,29 +602,29 @@ begin
         reset_system;
         -- Simultaneous Clock (50) + Voltage (50) + Temp (50) + Probe (10) = 160 >= 128
         -- Event 1: 160 >= 128 -> Spike 1 (V_reset = 32)
-        real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
-        real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
-        real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
-        real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
+        btnc_clk_glitch     <= '1'; real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
+        btnu_volt_drop      <= '1'; real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
+        btnl_temp_anomaly   <= '1'; real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
+        btnr_probe_cap      <= '1'; real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
         wait_cycles(1);
-        real_clk_soft_spk   <= '0';
-        real_v_soft_spk     <= '0';
-        real_temp_soft_spk  <= '0';
-        real_probe_soft_spk <= '0';
+        btnc_clk_glitch     <= '0'; real_clk_soft_spk   <= '0';
+        btnu_volt_drop      <= '0'; real_v_soft_spk     <= '0';
+        btnl_temp_anomaly   <= '0'; real_temp_soft_spk  <= '0';
+        btnr_probe_cap      <= '0'; real_probe_soft_spk <= '0';
         wait_cycles(4);
         assert (alert_count_out = 1)
             report "TB-14 Check 1 FAILED: Expected Spike 1 on 4-parameter combination!" severity failure;
 
         -- Event 2: 32 + 160 = 192 >= 128 -> Spike 2 -> Key Clear
-        real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
-        real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
-        real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
-        real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
+        btnc_clk_glitch     <= '1'; real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
+        btnu_volt_drop      <= '1'; real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
+        btnl_temp_anomaly   <= '1'; real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
+        btnr_probe_cap      <= '1'; real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
         wait_cycles(1);
-        real_clk_soft_spk   <= '0';
-        real_v_soft_spk     <= '0';
-        real_temp_soft_spk  <= '0';
-        real_probe_soft_spk <= '0';
+        btnc_clk_glitch     <= '0'; real_clk_soft_spk   <= '0';
+        btnu_volt_drop      <= '0'; real_v_soft_spk     <= '0';
+        btnl_temp_anomaly   <= '0'; real_temp_soft_spk  <= '0';
+        btnr_probe_cap      <= '0'; real_probe_soft_spk <= '0';
         wait_cycles(5);
         assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
             report "TB-14 FAILED: 4-parameter pattern did not escalate to key clear!" severity failure;
@@ -549,9 +640,11 @@ begin
 
         -- TB-15: Satu gray event, lalu tidak ada input. Pantau membrane potential
         reset_system;
+        btnc_clk_glitch   <= '1';
         real_clk_soft_spk <= '1';
         real_clk_soft_q   <= to_unsigned(1, 4); -- +50 weight
         wait_cycles(1);
+        btnc_clk_glitch   <= '0';
         real_clk_soft_spk <= '0';
         wait_cycles(3);
         assert (snn_v_mem(1) = 50)
@@ -575,17 +668,12 @@ begin
         -- TB-16: Gray event diulang dengan interval < T_decay
         reset_system;
         -- Deposit +50, leak 1 tick, repeat 4 times:
-        -- Dep 1 (+50): V=50
-        -- Leak 1: V=38
-        -- Dep 2 (+50): V=88
-        -- Leak 2: V=66
-        -- Dep 3 (+50): V=116
-        -- Leak 3: V=87
-        -- Dep 4 (+50): V=137 >= 128 => Spike 1!
         for step in 1 to 3 loop
+            btnc_clk_glitch   <= '1';
             real_clk_soft_spk <= '1';
             real_clk_soft_q   <= to_unsigned(1, 4);
             wait_cycles(1);
+            btnc_clk_glitch   <= '0';
             real_clk_soft_spk <= '0';
             wait_cycles(2);
             -- Single leak tick (interval < T_decay)
@@ -597,9 +685,11 @@ begin
         end loop;
 
         -- Final 4th deposit
+        btnc_clk_glitch   <= '1';
         real_clk_soft_spk <= '1';
         real_clk_soft_q   <= to_unsigned(1, 4);
         wait_cycles(1);
+        btnc_clk_glitch   <= '0';
         real_clk_soft_spk <= '0';
         wait_cycles(4);
         report "  TB-16 After Deposit 4: V = " & integer'image(to_integer(snn_v_mem(1))) & ", Alerts = " & integer'image(to_integer(alert_count_out)) severity note;
