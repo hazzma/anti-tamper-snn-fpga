@@ -29,9 +29,9 @@ class SNNGuardClient:
         if not self.ser:
             print(f"[MOCK TX] {cmd}")
             return "OK MOCK"
-        full_cmd = (cmd.strip() + "\n").encode("ascii")
+        full_cmd = (cmd.strip() + "\r\n").encode("ascii")
         self.ser.write(full_cmd)
-        time.sleep(0.05)
+        time.sleep(0.2)
         response = self.ser.read_all().decode("ascii", errors="replace").strip()
         return response
 
@@ -66,8 +66,15 @@ def interactive_shell():
     print(" Commands: PING, S <0-4>, G <us> <div>, ARM <0/1>, BYPASS <0/1>,")
     print("           MODE <A/B/C>, UNLOCK, K, exit")
     print("=================================================================")
-    port = sys.argv[1] if len(sys.argv) > 1 else "COM3"
-    client = SNNGuardClient(port=port)
+    import argparse
+    parser = argparse.ArgumentParser(description="SNN Anti-Tamper Guard Host CLI")
+    parser.add_argument("pos_port", nargs="?", default=None, help="COM port (misal COM57)")
+    parser.add_argument("--port", "-p", default=None, help="COM port (misal COM57)")
+    parser.add_argument("--baud", "-b", type=int, default=115200, help="Baud rate (default 115200)")
+    args = parser.parse_args()
+
+    chosen_port = args.port or args.pos_port or "COM57"
+    client = SNNGuardClient(port=chosen_port, baudrate=args.baud)
 
     while True:
         try:

@@ -95,6 +95,63 @@ Sistem memanfaatkan **Spiking Neural Network (SNN)** berbasis model neuron **Lea
 
 ---
 
+## 🧠 Arsitektur Komprehensif Spiking Neural Network (SNN Layer 3)
+
+Subsistem pertahanan ini menggunakan arsitektur **Integer Bit-Exact Leaky Integrate-and-Fire (LIF)** 4-Neuron yang dirancang tanpa floating-point guna mencapai efisiensi area dan latensi deterministik 10 ns (1 siklus clock @ 100 MHz).
+
+### 1. Formulasi Matematika Model Neuron LIF
+Setiap neuron $i \in \{0, 1, 2, 3\}$ memiliki potensial membran integer 16-bit bersandi ($V_i \in [-32768, 32767]$) yang diperbarui secara siklis:
+
+$$I_i[t] = \sum_{j=0}^{11} W_{i,j} \cdot S_j[t] \cdot q_j[t]$$
+
+1. **Integrasi Sinaptik (Input Accumulation)**:
+   $$V_i[t] \leftarrow V_i[t-1] + I_i[t]$$
+2. **Pemicuan Spike & Subtraktif Reset (Threshold Check)**:
+   $$\text{Jika } V_i[t] \ge \Theta_i \implies \begin{cases} \text{Spike Out}_i = 1 \\ V_i[t] \leftarrow V_i[t] - \Theta_i \quad \text{(Soft/Subtractive Reset)} \end{cases}$$
+3. **Kebocoran Eksponensial (Leak Decay)**:
+   Terjadi secara periodik setiap sinyal `leak_tick` aktif (berbasis waktu nyata):
+   $$V_i[t] \leftarrow V_i[t] - (V_i[t] \gg M_i)$$
+
+---
+
+### 2. Parameter Intrinsik Keempat Neuron
+
+| ID Neuron | Nama Kelas Deteksi | Ambang Batas ($\Theta_i$) | Pergeseran Bocor ($M_i$) | Karakteristik & Respon Ancaman |
+| :---: | :--- | :---: | :---: | :--- |
+| **Neuron 0** | **Transient Anomaly** | `128` | $M=3$ (Bocor cepat $\approx 12.5\%$/tick) | Mendeteksi glitch sesaat/noise acak. Muatan cepat surut agar tidak menimbulkan false alarm. |
+| **Neuron 1** | **Repeat-Probe Attack** | `128` | $M=2$ (Bocor lambat $\approx 25\%$/tick) | **Mendeteksi Hacker Berulang (Uji N17 & V10)**. Menampung pulsa berulang berjarak dekat hingga meluap. |
+| **Neuron 2** | **Combined Multi-Stress**| `128` | $M=4$ (Bocor sangat lambat $\approx 6.25\%$/tick) | Sensitif terhadap akumulasi gabungan (anomali clock + pemanas stres termal). |
+| **Neuron 3** | **Voltage Drop Attack** | `128` | $M=4$ (Bocor lambat) | Didedikasikan untuk anomali fluktuasi drop tegangan pasokan $V_{CCINT}$. |
+
+---
+
+### 3. Matriks Bobot Sinapsis Resmi (Synaptic Weight Matrix $W_{i,j}$)
+SNN menerima **12 Saluran Sensor (Channels)** secara simultan. Bobot bernilai integer 8-bit bersandi ($[-128, 127]$) yang disimpan pada package [`rtl/pkg_weights_gen.vhd`](rtl/pkg_weights_gen.vhd):
+
+| No | Nama Saluran Sensor ($j$) | Deskripsi Saluran Input | Bobot N0 (Transient) | Bobot N1 (Repeat-Probe) | Bobot N2 (Combined) | Bobot N3 (Voltage) |
+| :---: | :--- | :--- | :---: | :---: | :---: | :---: |
+| **0** | `CH_CLK_FAST_H` | Clock Overclocking Ekstrem | **+16** | **+4** | **+2** | 0 |
+| **1** | `CH_CLK_SLOW_H` | Clock Underclocking Rendah | **+16** | 0 | **+2** | 0 |
+| **2** | `CH_CLK_STOP_H` | Clock Hilang / Terhenti Total | **+16** | 0 | 0 | 0 |
+| **3** | `CH_MMCM_UNLOCK_H`| MMCM PLL Hilang Kunci (*Loss of Lock*) | **+16** | 0 | **+4** | 0 |
+| **4** | `CH_V_UNDER_H` | Tegangan Drop di Bawah Ambang Kritis | **+16** | 0 | **+2** | 0 |
+| **5** | `CH_V_OVER_H` | Tegangan Lonjakan Berlebih (*Spike*) | **+16** | 0 | **+2** | 0 |
+| **6** | `CH_KEY_CORRUPT_H`| Kunci Bayangan Tidak Sinkron (*Integrity*) | **+16** | 0 | 0 | 0 |
+| **7** | `CH_JTAG_H` | Aktivitas Tamper Probe JTAG Ilegal | 0 | 0 | **+4** | 0 |
+| **8** | `CH_CLK_SOFT` | **Glitch Clock Halus / Pulsa N17** | 0 | **+50** | **+12** | 0 |
+| **9** | `CH_V_SOFT` | **Fluktuasi Tegangan Ringan** | 0 | **+50** | **+12** | 0 |
+| **10**| `CH_SPARE_10` | Saluran Cadangan 1 | 0 | 0 | 0 | 0 |
+| **11**| `CH_SPARE_11` | Saluran Cadangan 2 | 0 | 0 | 0 | 0 |
+
+> [!NOTE]
+> - Saluran Hard (0–6) berbobot $+16$ berfungsi memberikan sinyal kontribusi langsung pada Neuron 0 saat terjadi anomali drastis.
+> - Saluran Soft (8–9) berbobot **$+50$** secara khusus diarahkan ke **Neuron 1**. Karena ambang batas $\Theta_1 = 128$, maka:
+>   - **1x Tekan N17**: Masuk muatan $+50$ ($50 < 128$), ember tidak luber $\rightarrow$ surut kembali ke 0.
+>   - **3x Tekan Cepat N17**: Masuk muatan $3 \times 50 = 150 \ge 128$ $\rightarrow$ ember luber ke-1 (Warning / Alert)!
+>   - **3x Tekan Cepat Lanjutan**: Akumulasi melampaui ambang batas lagi $\rightarrow$ ember luber ke-2 $\rightarrow$ memicu **Zeroization (GSR)**.
+
+---
+
 ## 🎛️ Pemetaan Tombol, Saklar, & LED (Pinout Hardware)
 
 Seluruh pemetaan pin disesuaikan dengan file master XDC resmi Digilent Nexys A7-100T ([`constr/nexys_a7_100t.xdc`](constr/nexys_a7_100t.xdc)).
