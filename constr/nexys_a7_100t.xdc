@@ -79,9 +79,6 @@ set_property -dict { PACKAGE_PIN T14   IOSTANDARD LVCMOS33 } [get_ports { AN[5] 
 set_property -dict { PACKAGE_PIN K2    IOSTANDARD LVCMOS33 } [get_ports { AN[6] }];
 set_property -dict { PACKAGE_PIN U13   IOSTANDARD LVCMOS33 } [get_ports { AN[7] }];
 
-## USB-UART Interface (FTDI Bridge)
-set_property -dict { PACKAGE_PIN D4    IOSTANDARD LVCMOS33 } [get_ports { UART_TXD_IN }];  # FPGA TX -> FTDI RX
-set_property -dict { PACKAGE_PIN C4    IOSTANDARD LVCMOS33 } [get_ports { UART_RXD_OUT }]; # FTDI TX -> FPGA RX
 
 ## Timing & Asynchronous Clock Groups (FSD v2 §9)
 set_clock_groups -asynchronous \

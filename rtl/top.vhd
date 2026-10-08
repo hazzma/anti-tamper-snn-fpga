@@ -18,12 +18,12 @@ entity top is
         CPU_RESETN    : in  std_logic;
         
         -- Physical User I/O
-        SW            : in  std_logic_vector(15 downto 0);
-        BTNC          : in  std_logic;
-        BTNU          : in  std_logic;
-        BTND          : in  std_logic;
-        BTNL          : in  std_logic; -- Left: Soft Temperature Anomaly
-        BTNR          : in  std_logic; -- Right: Capacitance Probing (Hold to accumulate)
+        SW            : in  std_logic_vector(15 downto 0) := (others => '0');
+        BTNC          : in  std_logic := '0';
+        BTNU          : in  std_logic := '0';
+        BTND          : in  std_logic := '0';
+        BTNL          : in  std_logic := '0'; -- Left: Soft Temperature Anomaly
+        BTNR          : in  std_logic := '0'; -- Right: Capacitance Probing (Hold to accumulate)
         LED           : out std_logic_vector(15 downto 0);
         
         -- Multi-Color RGB LEDs (LD16, LD17)
@@ -37,11 +37,7 @@ entity top is
         -- 7-Segment Display
         AN            : out std_logic_vector(7 downto 0);
         SEG           : out std_logic_vector(6 downto 0);
-        DP            : out std_logic;
-        
-        -- USB-UART Interface
-        UART_TXD_IN   : out std_logic; -- FPGA TX -> FTDI RX
-        UART_RXD_OUT  : in  std_logic  -- FTDI TX -> FPGA RX
+        DP            : out std_logic
     );
 end entity top;
 
@@ -453,9 +449,6 @@ begin
             drp_busy      => drp_busy,
             glitch_active => glitch_act
         );
-
-    -- Standalone FPGA Hardware Mode (UART line held idle high)
-    UART_TXD_IN <= '1';
 
     ----------------------------------------------------------------------------
     -- U3: Clock Monitor (Layer 1)

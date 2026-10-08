@@ -27,7 +27,15 @@ architecture sim of tb_top is
     signal btnc         : std_logic := '0';
     signal btnu         : std_logic := '0';
     signal btnd         : std_logic := '0';
+    signal btnl         : std_logic := '0';
+    signal btnr         : std_logic := '0';
     signal led          : std_logic_vector(15 downto 0);
+    signal led16_r      : std_logic;
+    signal led16_g      : std_logic;
+    signal led16_b      : std_logic;
+    signal led17_r      : std_logic;
+    signal led17_g      : std_logic;
+    signal led17_b      : std_logic;
     signal an           : std_logic_vector(7 downto 0);
     signal seg          : std_logic_vector(6 downto 0);
     signal dp           : std_logic;
@@ -93,12 +101,18 @@ begin
             BTNC         => btnc,
             BTNU         => btnu,
             BTND         => btnd,
+            BTNL         => btnl,
+            BTNR         => btnr,
             LED          => led,
+            LED16_R      => led16_r,
+            LED16_G      => led16_g,
+            LED16_B      => led16_b,
+            LED17_R      => led17_r,
+            LED17_G      => led17_g,
+            LED17_B      => led17_b,
             AN           => an,
             SEG          => seg,
-            DP           => dp,
-            UART_TXD_IN  => uart_txd_in,
-            UART_RXD_OUT => uart_rxd_out
+            DP           => dp
         );
 
     ----------------------------------------------------------------------------
