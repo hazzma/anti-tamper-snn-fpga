@@ -133,8 +133,8 @@ begin
                 manual_wipe   <= '0';
                 key_load_en   <= '0';
                 glitch_req    <= '0';
-                glitch_div    <= to_unsigned(40, 8);
-                glitch_dur_us <= to_unsigned(2, 16);
+                glitch_div    <= to_unsigned(20, 8);
+                glitch_dur_us <= to_unsigned(50, 16);
                 stress_en     <= '0';
                 synth_spk_r   <= (others => '0');
                 tx_valid      <= '0';

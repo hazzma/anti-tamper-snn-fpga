@@ -51,6 +51,10 @@ architecture rtl of telemetry is
     signal an_reg       : std_logic_vector(7 downto 0) := (others => '1');
     signal cath_reg     : std_logic_vector(6 downto 0) := (others => '1');
 
+    -- Membrane Peak-Hold for 7-Segment Display (250 ms persistence for human visibility)
+    signal v_disp_val   : signed(15 downto 0) := (others => '0');
+    signal v_hold_timer : unsigned(24 downto 0) := (others => '0');
+
     function hex_to_7seg (nibble : std_logic_vector(3 downto 0)) return std_logic_vector is
     begin
         case nibble is
@@ -114,6 +118,31 @@ begin
     end process p_timer;
 
     ----------------------------------------------------------------------------
+    -- Membrane Peak-Hold Process (Holds peak for 250 ms for human visual persistence)
+    ----------------------------------------------------------------------------
+    p_v_hold : process(clk100)
+    begin
+        if rising_edge(clk100) then
+            if rstn = '0' then
+                v_disp_val   <= (others => '0');
+                v_hold_timer <= (others => '0');
+            else
+                if v_n1_membrane > v_disp_val then
+                    v_disp_val   <= v_n1_membrane;
+                    v_hold_timer <= (others => '0');
+                else
+                    if v_hold_timer >= 24999999 then -- 250 ms @ 100 MHz
+                        v_hold_timer <= (others => '0');
+                        v_disp_val   <= v_n1_membrane;
+                    else
+                        v_hold_timer <= v_hold_timer + 1;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process p_v_hold;
+
+    ----------------------------------------------------------------------------
     -- 7-Segment 8-Digit Display Scanner (FSD v2 §10)
     ----------------------------------------------------------------------------
     p_7seg : process(clk100)
@@ -142,7 +171,7 @@ begin
 
                 -- Display content mapping:
                 -- Digit 7:6 => Active Class
-                -- Digit 5:2 => V[n1] membrane hex
+                -- Digit 5:2 => V[n1] membrane hex (peak-held for visibility)
                 -- Digit 1:0 => State (AL, ZO, AR, NR)
                 case digit_idx is
                     when 7 =>
@@ -150,13 +179,13 @@ begin
                     when 6 =>
                         cath_reg <= "0110111"; -- '=' or separator
                     when 5 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_n1_membrane(15 downto 12)));
+                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(15 downto 12)));
                     when 4 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_n1_membrane(11 downto 8)));
+                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(11 downto 8)));
                     when 3 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_n1_membrane(7 downto 4)));
+                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(7 downto 4)));
                     when 2 =>
-                        cath_reg <= hex_to_7seg(std_logic_vector(v_n1_membrane(3 downto 0)));
+                        cath_reg <= hex_to_7seg(std_logic_vector(v_disp_val(3 downto 0)));
                     when 1 =>
                         if alert_status = '1' then
                             cath_reg <= "0001000"; -- 'A'

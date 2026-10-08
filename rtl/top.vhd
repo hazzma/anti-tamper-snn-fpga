@@ -144,6 +144,8 @@ architecture rtl of top is
     signal seq_burst_cnt      : integer range 0 to 10 := 0;
     signal seq_timer          : unsigned(23 downto 0) := (others => '0');
     signal seq_glitch_req     : std_logic := '0';
+    signal seq_glitch_div     : unsigned(7 downto 0) := to_unsigned(20, 8);
+    signal seq_glitch_dur     : unsigned(15 downto 0) := to_unsigned(50, 16);
     signal seq_stress_en      : std_logic := '0';
     signal seq_attacking      : std_logic := '0';
     signal seq_div_req        : std_logic := '0';
@@ -151,6 +153,8 @@ architecture rtl of top is
 
     -- Combined Control Signals (Physical Hardware + UART Parser)
     signal total_glitch_req   : std_logic;
+    signal total_glitch_div   : unsigned(7 downto 0);
+    signal total_glitch_dur   : unsigned(15 downto 0);
     signal total_stress_en    : std_logic;
     signal total_attack_act   : std_logic;
     signal total_div_req      : std_logic;
@@ -215,6 +219,8 @@ begin
 
     -- Hardware Controls
     total_glitch_req <= glitch_req or seq_glitch_req;
+    total_glitch_div <= seq_glitch_div when (seq_glitch_req = '1' or seq_attacking = '1') else glitch_div;
+    total_glitch_dur <= seq_glitch_dur when (seq_glitch_req = '1' or seq_attacking = '1') else glitch_dur_us;
     total_stress_en  <= stress_en or SW(2) or seq_stress_en;
     total_attack_act <= attack_active or seq_attacking;
     total_div_req    <= seq_div_req;
@@ -240,6 +246,8 @@ begin
                 seq_burst_cnt  <= 0;
                 seq_timer      <= (others => '0');
                 seq_glitch_req <= '0';
+                seq_glitch_div <= to_unsigned(20, 8);
+                seq_glitch_dur <= to_unsigned(50, 16);
                 seq_stress_en  <= '0';
                 seq_attacking  <= '0';
                 seq_div_req    <= '0';
@@ -262,6 +270,8 @@ begin
                         seq_timer <= (others => '0');
                         if btnc_pulse = '1' then
                             seq_glitch_req <= '1';
+                            seq_glitch_div <= to_unsigned(20, 8); -- 50 MHz glitch
+                            seq_glitch_dur <= to_unsigned(50, 16); -- 50 us duration
                         elsif btnu_pulse = '1' then
                             seq_state     <= SEQ_SWEEP;
                             seq_attacking <= '1';
@@ -270,22 +280,28 @@ begin
                             case SW(15 downto 12) is
                                 when "0000" => -- SCEN0: Normal
                                     null;
-                                when "0001" => -- SCEN1: Single Glitch
+                                when "0001" => -- SCEN1: Single Glitch (200 MHz, div=5)
                                     seq_burst_cnt  <= 1;
                                     seq_state      <= SEQ_BURST_GLITCH;
                                     seq_attacking  <= '1';
                                     seq_glitch_req <= '1';
-                                when "0010" => -- SCEN2: Repeat-Probe (5 glitches)
+                                    seq_glitch_div <= to_unsigned(5, 8);
+                                    seq_glitch_dur <= to_unsigned(50, 16);
+                                when "0010" => -- SCEN2: Repeat-Probe (5 glitches, 50 MHz, div=20)
                                     seq_burst_cnt  <= 5;
                                     seq_state      <= SEQ_BURST_GLITCH;
                                     seq_attacking  <= '1';
                                     seq_glitch_req <= '1';
+                                    seq_glitch_div <= to_unsigned(20, 8);
+                                    seq_glitch_dur <= to_unsigned(50, 16);
                                 when "0011" => -- SCEN3: Combined Glitch + Stress
                                     seq_burst_cnt  <= 5;
                                     seq_stress_en  <= '1';
                                     seq_state      <= SEQ_BURST_GLITCH;
                                     seq_attacking  <= '1';
                                     seq_glitch_req <= '1';
+                                    seq_glitch_div <= to_unsigned(20, 8);
+                                    seq_glitch_dur <= to_unsigned(50, 16);
                                 when "0100" => -- SCEN4: Frequency Sweep
                                     seq_state     <= SEQ_SWEEP;
                                     seq_attacking <= '1';
@@ -362,8 +378,8 @@ begin
             drp_drdy      => drp_drdy,
             mmcm_locked   => mmcm_locked,
             glitch_req    => total_glitch_req,
-            glitch_div    => glitch_div,
-            glitch_dur_us => glitch_dur_us,
+            glitch_div    => total_glitch_div,
+            glitch_dur_us => total_glitch_dur,
             set_div_req   => total_div_req,
             set_div_val   => total_div_val,
             drp_busy      => drp_busy,

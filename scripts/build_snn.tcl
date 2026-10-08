@@ -73,6 +73,8 @@ report_drc -file "$output_dir/route_drc.rpt"
 # Bitstream Generation
 puts "Generating Bitstream..."
 write_bitstream -force "$output_dir/anti_tamper_snn.bit"
+file mkdir "$project_dir/vivado_project/anti_tamper_snn.runs/impl_1"
+file copy -force "$output_dir/anti_tamper_snn.bit" "$project_dir/vivado_project/anti_tamper_snn.runs/impl_1/top.bit"
 
 puts "========================================================================="
 puts " SNN Anti-Tamper Guard Build Finished Successfully!"
