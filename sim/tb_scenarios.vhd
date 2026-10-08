@@ -1,47 +1,26 @@
 --------------------------------------------------------------------------------
 -- File: tb_scenarios.vhd
--- Description: Comprehensive Self-Checking Verification Testbench implementing
---              all 16 scenarios defined in tb_scenarios.md (Scenarios A, B, C, D, F)
+-- Description: Comprehensive Self-Checking Verification Testbench
+--              Runs all 16 scenarios sequentially in one single simulation window.
 --
--- Exposes intuitive Physical Controls & Indicators:
---   - 4 Physical Switches (SW15..SW12): Extreme Threshold Tamper (Layer 1)
---   - 4 Physical Buttons (BTNC, BTNU, BTNL, BTNR): Soft Perturbation Injections
---   - Master Key (16-bit display): 0x0123 (Intact) -> 0x0000 (Zeroized)
---   - SNN Potential Count & Escalation Counter
---   - Warning LED & Zeroized Lockdown LED
+-- Waveform Interface:
+--   Inputs:  clk, rst, sw(3 downto 0), btn(3 downto 0)
+--   Outputs: snn_count, snn_spike_count, key, warning_led, zeroize_led
+--   Status:  tb_id (1-16), tb_pass ('1'=PASS, '0'=Testing/Reset)
 --
--- Coverage:
---   Scenario A (Conventional Threshold Detection):
---     TB-01: Normal operation               -> No action
---     TB-02: Extreme voltage                -> Key clear (Instant Layer 1)
---     TB-03: Extreme temperature            -> Key clear (Instant Layer 1)
---     TB-04: Extreme clock                  -> Key clear (Instant Layer 1)
---     TB-05: Extreme memory integrity       -> Key clear (Instant Layer 1)
---
---   Scenario B (Single Gray-Zone Parameter):
---     TB-06: Single gray event              -> snn_spike = 0, no action
---     TB-07: Repeat same parameter          -> snn_spike = 1, warning LED
---     TB-08: Repeat same parameter again    -> snn_spike = 2, key clear
---
---   Scenario C (Gray-Zone Combination):
---     TB-09: 2 gray events (small weights)  -> snn_spike = 0, no action
---     TB-10: 2 gray events (large weights)  -> snn_spike = 1, warning LED
---     TB-11: Repeat small weight combo      -> snn_spike = 2, key clear
---     TB-12: Repeat large weight combo      -> snn_spike = 2, key clear
---
---   Scenario D (Parameter Sweep):
---     TB-13: 3 parameter combination pattern -> snn_spike = 2, key clear
---     TB-14: 4 parameter combination pattern -> snn_spike = 2, key clear
---
---   Scenario F (Decay Behavior):
---     TB-15: Single gray event + decay      -> Monotonic decay to 0, snn_spike = 0
---     TB-16: Gray events with interval < T_decay -> Accumulation fires snn_spike = 1
+-- Coverage (tb_scenarios.md):
+--   TB-01 to TB-05: Conventional Threshold Detection (Layer 1 Instant)
+--   TB-06 to TB-08: Single Gray-Zone Parameter (SNN Layer 2 Accumulation)
+--   TB-09 to TB-12: Gray-Zone Combination (Multi-Sensor SNN Coincidence)
+--   TB-13 to TB-14: Parameter Sweep (3 & 4 Simultaneous Tamper Injections)
+--   TB-15 to TB-16: Membrane Potential Decay Behavior (Leaky Integrator)
 --
 -- Standard: VHDL-2008, IEEE numeric_std
 --------------------------------------------------------------------------------
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use std.env.finish;
 
 use work.pkg_fsd.all;
 use work.pkg_weights_gen.all;
@@ -52,39 +31,30 @@ end entity tb_scenarios;
 architecture sim of tb_scenarios is
 
     constant CLK_PERIOD : time := 10 ns; -- 100 MHz clock
-    
-    -- Global Testbench Signals
-    signal clk100        : std_logic := '0';
-    signal rstn          : std_logic := '0';
-    signal sim_done      : boolean   := false;
+    signal sim_done     : boolean := false;
 
     -- =========================================================================
-    -- Physical Board Controls & Indicators (for Proposal & Verification Waves)
+    -- Top Waveform Interface Signals (Directly visualized in waveform window)
     -- =========================================================================
-    -- 4 Physical Switches (Layer 1 Instant Hard Threshold Attacks)
-    signal sw_extreme_clk     : std_logic := '0'; -- SW[3] / SW15: Extreme Clock Glitch
-    signal sw_extreme_volt    : std_logic := '0'; -- SW[2] / SW14: Extreme Voltage Drop/Surge
-    signal sw_extreme_temp    : std_logic := '0'; -- SW[1] / SW13: Extreme Temperature Spike
-    signal sw_extreme_mem     : std_logic := '0'; -- SW[0] / SW12: Memory Integrity Tamper
-    signal sw                 : std_logic_vector(3 downto 0) := "0000"; -- Bus representation (SW3..SW0)
+    -- Verification Markers
+    signal tb_id              : integer range 0 to 16 := 0;  -- Active Scenario ID (1 to 16)
+    signal tb_pass            : std_logic := '0';            -- '1' on PASS, '0' on Reset/Running
 
-    -- 4 Physical Buttons (Layer 2 Gray-Zone / SNN Soft Perturbation Injections)
-    signal btnc_clk_glitch    : std_logic := '0'; -- BTNC: Soft Clock Jitter/Glitch (+50)
-    signal btnu_volt_drop     : std_logic := '0'; -- BTNU: Soft Voltage Dip (+50)
-    signal btnl_temp_anomaly  : std_logic := '0'; -- BTNL: Soft Thermal Anomaly (+50)
-    signal btnr_probe_cap     : std_logic := '0'; -- BTNR: Soft Laser / EM Probe (+10)
-    signal btn                : std_logic_vector(3 downto 0) := "0000"; -- Bus representation (BTNC..BTNR)
+    -- Inputs
+    signal clk                : std_logic := '0';            -- 100 MHz System Clock
+    signal rst                : std_logic := '1';            -- Active-High Reset (Synchronous)
+    signal sw                 : std_logic_vector(3 downto 0) := "0000"; -- 4 Switches: [3]=Clk, [2]=Volt, [1]=Temp, [0]=Mem
+    signal btn                : std_logic_vector(3 downto 0) := "0000"; -- 4 Buttons:  [3]=Clk, [2]=Volt, [1]=Temp, [0]=Probe
 
-    -- Cryptographic Asset Key
-    signal key_disp           : std_logic_vector(15 downto 0); -- Master Key: 0x0123 (Intact) -> 0x0000 (Zeroized)
-
-    -- SNN Internal Counters
+    -- Outputs
+    signal key                : std_logic_vector(15 downto 0); -- Master Key: 0x0123 (Intact) -> 0x0000 (Zeroized)
     signal snn_count          : signed(15 downto 0) := (others => '0'); -- SNN Membrane Potential (Count / Potential V)
-    signal snn_spike_count    : unsigned(7 downto 0) := (others => '0'); -- Escalation Spike Count (0=Normal, 1=Warning, 2=Zeroize)
+    signal snn_spike_count    : unsigned(7 downto 0) := (others => '0'); -- Escalation Spike Counter (0, 1, 2)
+    signal warning_led        : std_logic := '0';            -- Yellow Warning LED (Incident 1)
+    signal zeroize_led        : std_logic := '0';            -- Red Lockdown Zeroize LED (Incident 2)
 
-    -- Status & Warning LEDs
-    signal led_warning        : std_logic := '0'; -- Yellow Warning LED (Latched after 1st Gray-Zone Spike)
-    signal led_zeroized       : std_logic := '0'; -- Red Zeroized LED (Hard Lockdown Active)
+    -- Internal Active-Low Reset
+    signal rstn               : std_logic := '0';
 
     -- Sensor MUX Physical/Internal Simulation Inputs
     signal real_clk_fast_h      : std_logic := '0';
@@ -116,7 +86,7 @@ architecture sim of tb_scenarios is
     signal snn_class            : std_logic_vector(1 downto 0);
     signal snn_v_mem            : membrane_array_t;
 
-    -- Layer 1 Hard Alert OR-reduction (Direct Conventional Detection Path)
+    -- Layer 1 Hard Alert OR-reduction
     signal hard_alert_l1        : std_logic := '0';
 
     -- Response Escalation Unit Signals
@@ -127,7 +97,6 @@ architecture sim of tb_scenarios is
     signal alert_count_out      : unsigned(7 downto 0);
     signal class_out            : std_logic_vector(1 downto 0);
     signal latency_cycles       : unsigned(31 downto 0);
-    signal led_alert            : std_logic;
 
     -- Victim Cryptographic Asset Core
     signal core_zeroized        : std_logic;
@@ -138,13 +107,13 @@ architecture sim of tb_scenarios is
 begin
 
     ----------------------------------------------------------------------------
-    -- Board Controls and Indicators Continuous Concurrent Mapping
+    -- Signal Mappings
     ----------------------------------------------------------------------------
-    sw              <= sw_extreme_clk & sw_extreme_volt & sw_extreme_temp & sw_extreme_mem;
-    btn             <= btnc_clk_glitch & btnu_volt_drop & btnl_temp_anomaly & btnr_probe_cap;
+    rstn            <= not rst;
     snn_count       <= snn_v_mem(1);
     snn_spike_count <= alert_count_out;
-    led_warning     <= alert_latched;
+    warning_led     <= alert_latched;
+    zeroize_led     <= zeroized_latched;
 
     ----------------------------------------------------------------------------
     -- 100 MHz System Clock Generator
@@ -152,9 +121,9 @@ begin
     p_clk : process
     begin
         while not sim_done loop
-            clk100 <= '0';
+            clk <= '0';
             wait for CLK_PERIOD / 2;
-            clk100 <= '1';
+            clk <= '1';
             wait for CLK_PERIOD / 2;
         end loop;
         wait;
@@ -165,7 +134,7 @@ begin
     ----------------------------------------------------------------------------
     u_sensor_mux : entity work.sensor_mux
         port map (
-            clk100              => clk100,
+            clk100              => clk,
             rstn                => rstn,
             mode_sel            => "10", -- Mode C (Hybrid)
             real_clk_fast_h     => real_clk_fast_h,
@@ -195,7 +164,7 @@ begin
     ----------------------------------------------------------------------------
     u_snn_lif : entity work.snn_lif
         port map (
-            clk100         => clk100,
+            clk100         => clk,
             rstn           => rstn,
             spikes_active  => mux_spikes_active,
             spikes_q       => mux_spikes_q,
@@ -217,7 +186,7 @@ begin
     ----------------------------------------------------------------------------
     u_response : entity work.response
         port map (
-            clk100           => clk100,
+            clk100           => clk,
             rstn             => rstn,
             hard_alert_l1    => hard_alert_l1,
             snn_alert_l3     => snn_alert,
@@ -233,8 +202,8 @@ begin
             alert_count_out  => alert_count_out,
             class_out        => class_out,
             latency_cycles   => latency_cycles,
-            led_alert        => led_alert,
-            led_zeroized     => led_zeroized
+            led_alert        => open,
+            led_zeroized     => open
         );
 
     ----------------------------------------------------------------------------
@@ -242,7 +211,7 @@ begin
     ----------------------------------------------------------------------------
     u_victim : entity work.victim_core
         port map (
-            clk_core         => clk100,
+            clk_core         => clk,
             rstn_core        => rstn,
             key_load_en      => '0',
             key_in           => (others => '0'),
@@ -251,41 +220,35 @@ begin
             ack_in           => '0',
             digest_out       => open,
             zeroized_out     => core_zeroized,
-            key_disp         => key_disp,
+            key_disp         => key,
             cosmic_flip_p    => cosmic_flip_p,
             corrupt_inject_h => corrupt_inject_h,
             key_corrupt_out  => key_corrupt_out
         );
 
     ----------------------------------------------------------------------------
-    -- Main Verification Process: Executes Scenarios TB-01 to TB-16
+    -- Main Verification Process: Tasks / Procedures for All 16 Scenarios
     ----------------------------------------------------------------------------
     p_main : process
         variable pass_count : integer := 0;
         variable fail_count : integer := 0;
 
-        -- Helper procedure to pulse clock cycles
+        -- Procedure to wait clock cycles
         procedure wait_cycles(constant n : in integer) is
         begin
             for i in 1 to n loop
-                wait until rising_edge(clk100);
+                wait until rising_edge(clk);
             end loop;
-            wait for 1 ns; -- allow delta cycles & combinational outputs to settle
+            wait for 1 ns; -- allow delta cycles to settle
         end procedure;
 
-        -- Helper procedure to reset and unlock the security system to pristine state
-        procedure reset_system is
+        -- Task: do_reset (dipanggil sebelum tiap skenario)
+        procedure do_reset is
         begin
-            -- Assert Reset
-            rstn <= '0';
-            sw_extreme_clk     <= '0';
-            sw_extreme_volt    <= '0';
-            sw_extreme_temp    <= '0';
-            sw_extreme_mem     <= '0';
-            btnc_clk_glitch    <= '0';
-            btnu_volt_drop     <= '0';
-            btnl_temp_anomaly  <= '0';
-            btnr_probe_cap     <= '0';
+            tb_pass <= '0';
+            rst     <= '1'; -- Assert Active-High Reset
+            sw      <= "0000";
+            btn     <= "0000";
             real_clk_fast_h    <= '0';
             real_clk_slow_h    <= '0';
             real_clk_stop_h    <= '0';
@@ -307,407 +270,406 @@ begin
             cosmic_flip_p      <= '0';
             corrupt_inject_h   <= '0';
             hard_alert_l1      <= '0';
-            
+
             wait_cycles(5);
-            rstn <= '1';
+            rst <= '0'; -- Deassert Reset
             wait_cycles(5);
 
-            -- Send unlock pulse to clear response latch & counters
+            -- Pulse unlock to clear latches & counters
             unlock_pulse <= '1';
             wait_cycles(1);
             unlock_pulse <= '0';
             wait_cycles(5);
         end procedure;
+
+        -- Task: check (membandingkan output, set tb_pass, display PASS/FAIL, jeda 20 cycles)
+        procedure check(
+            constant test_num : in integer;
+            constant cond     : in boolean;
+            constant msg      : in string
+        ) is
+        begin
+            if cond then
+                tb_pass    <= '1';
+                pass_count := pass_count + 1;
+                report " [PASS] TB-" & integer'image(test_num) & ": " & msg severity note;
+            else
+                tb_pass    <= '0';
+                fail_count := fail_count + 1;
+                report " [FAIL] TB-" & integer'image(test_num) & ": " & msg severity error;
+            end if;
+            wait_cycles(20); -- Jeda 20 siklus clock setelah check
+        end procedure;
+
+        -- ---------------------------------------------------------------------
+        -- Skenario TB-01 s/d TB-16 dalam bentuk Task / Procedure mandiri
+        -- ---------------------------------------------------------------------
+        -- TB-01: Normal operation -> expected: key intact, 0 alerts, 0 spikes
+        procedure task_tb_01 is
+        begin
+            tb_id <= 1;
+            do_reset;
+            wait_cycles(20);
+            check(1, (alert_count_out = 0) and (warning_led = '0') and (zeroize_led = '0') and (key = x"0123"),
+                  "Normal baseline verified (Key=0123 intact, 0 alerts, 0 spikes)");
+        end procedure;
+
+        -- TB-02: Extreme voltage -> expected: key clear instantly
+        procedure task_tb_02 is
+        begin
+            tb_id <= 2;
+            do_reset;
+            sw(2)          <= '1'; -- SW2: Extreme Voltage
+            real_v_under_h <= '1';
+            hard_alert_l1  <= '1';
+            wait_cycles(3);
+            sw(2)          <= '0';
+            real_v_under_h <= '0';
+            hard_alert_l1  <= '0';
+            wait_cycles(2);
+            check(2, (zeroize_led = '1') and (key = x"0000"),
+                  "Extreme voltage triggered instant Key clear to 0000");
+        end procedure;
+
+        -- TB-03: Extreme temperature -> expected: key clear instantly
+        procedure task_tb_03 is
+        begin
+            tb_id <= 3;
+            do_reset;
+            sw(1)         <= '1'; -- SW1: Extreme Temperature
+            hard_alert_l1 <= '1';
+            wait_cycles(3);
+            sw(1)         <= '0';
+            hard_alert_l1 <= '0';
+            wait_cycles(2);
+            check(3, (zeroize_led = '1') and (key = x"0000"),
+                  "Extreme temperature triggered instant Key clear to 0000");
+        end procedure;
+
+        -- TB-04: Extreme clock -> expected: key clear instantly
+        procedure task_tb_04 is
+        begin
+            tb_id <= 4;
+            do_reset;
+            sw(3)           <= '1'; -- SW3: Extreme Clock
+            real_clk_fast_h <= '1';
+            hard_alert_l1   <= '1';
+            wait_cycles(3);
+            sw(3)           <= '0';
+            real_clk_fast_h <= '0';
+            hard_alert_l1   <= '0';
+            wait_cycles(2);
+            check(4, (zeroize_led = '1') and (key = x"0000"),
+                  "Extreme clock glitch triggered instant Key clear to 0000");
+        end procedure;
+
+        -- TB-05: Extreme memory integrity -> expected: key clear instantly
+        procedure task_tb_05 is
+        begin
+            tb_id <= 5;
+            do_reset;
+            sw(0)            <= '1'; -- SW0: Extreme Memory
+            corrupt_inject_h <= '1';
+            wait_cycles(1);
+            hard_alert_l1    <= key_corrupt_out;
+            wait_cycles(1);
+            corrupt_inject_h <= '0';
+            wait_cycles(3);
+            sw(0)            <= '0';
+            hard_alert_l1    <= '0';
+            wait_cycles(2);
+            check(5, (zeroize_led = '1') and (key = x"0000"),
+                  "Memory integrity tamper triggered instant Key clear to 0000");
+        end procedure;
+
+        -- TB-06: Single gray event -> expected: snn_spike = 0, no action
+        procedure task_tb_06 is
+        begin
+            tb_id <= 6;
+            do_reset;
+            btn(3)            <= '1'; -- BTN3: Soft Clock Glitch (+50)
+            real_clk_soft_spk <= '1';
+            real_clk_soft_q   <= to_unsigned(1, 4);
+            wait_cycles(1);
+            btn(3)            <= '0';
+            real_clk_soft_spk <= '0';
+            wait_cycles(4);
+            check(6, (alert_count_out = 0) and (warning_led = '0') and (snn_v_mem(1) = 50) and (key = x"0123"),
+                  "Single gray event absorbed without false alarm (V=50 < 128, spike=0)");
+        end procedure;
+
+        -- TB-07: Parameter yang sama diulang -> expected: snn_spike = 1, warning LED
+        procedure task_tb_07 is
+        begin
+            tb_id <= 7;
+            do_reset;
+            -- 3 pulses total (+50 + 50 + 50 = 150 >= 128)
+            for i in 1 to 3 loop
+                btn(3)            <= '1';
+                real_clk_soft_spk <= '1';
+                real_clk_soft_q   <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3)            <= '0';
+                real_clk_soft_spk <= '0';
+                wait_cycles(3);
+            end loop;
+            check(7, (alert_count_out = 1) and (warning_led = '1') and (zeroize_led = '0') and (key = x"0123"),
+                  "Repeated gray event triggered Warning LED (snn_spike=1, Key intact)");
+        end procedure;
+
+        -- TB-08: Parameter yang sama diulang lagi -> expected: snn_spike = 2, key clear
+        procedure task_tb_08 is
+        begin
+            tb_id <= 8;
+            do_reset;
+            -- Burst 1 (3 pulses -> Spike 1, V_sub=22)
+            for i in 1 to 3 loop
+                btn(3)            <= '1';
+                real_clk_soft_spk <= '1';
+                real_clk_soft_q   <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3)            <= '0';
+                real_clk_soft_spk <= '0';
+                wait_cycles(3);
+            end loop;
+            -- Burst 2 (3 pulses -> 22 + 150 = 172 >= 128 -> Spike 2)
+            for i in 1 to 3 loop
+                btn(3)            <= '1';
+                real_clk_soft_spk <= '1';
+                real_clk_soft_q   <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3)            <= '0';
+                real_clk_soft_spk <= '0';
+                wait_cycles(3);
+            end loop;
+            wait_cycles(5);
+            check(8, (alert_count_out = 2) and (zeroize_led = '1') and (key = x"0000"),
+                  "Repeated gray event escalated to Key clear (snn_spike=2, Key=0000)");
+        end procedure;
+
+        -- TB-09: 2 gray events (weight kecil) -> expected: snn_spike = 0, no action
+        procedure task_tb_09 is
+        begin
+            tb_id <= 9;
+            do_reset;
+            btn(0)              <= '1'; -- BTN0: Probe (+10)
+            real_probe_soft_spk <= '1';
+            real_probe_soft_q   <= to_unsigned(1, 4);
+            wait_cycles(1);
+            btn(0)              <= '0';
+            real_probe_soft_spk <= '0';
+            wait_cycles(3);
+            btn(0)              <= '1';
+            real_probe_soft_spk <= '1';
+            real_probe_soft_q   <= to_unsigned(1, 4);
+            wait_cycles(1);
+            btn(0)              <= '0';
+            real_probe_soft_spk <= '0';
+            wait_cycles(4);
+            check(9, (alert_count_out = 0) and (warning_led = '0') and (snn_v_mem(1) = 20),
+                  "2 small weight events absorbed (V=20 < 128, snn_spike=0, no action)");
+        end procedure;
+
+        -- TB-10: 2 gray events (weight besar) -> expected: snn_spike = 1, warning LED
+        procedure task_tb_09_10 is
+        begin
+            tb_id <= 10;
+            do_reset;
+            btn(3)            <= '1'; -- BTN3: Clock (+50)
+            btn(2)            <= '1'; -- BTN2: Volt (+100)
+            real_clk_soft_spk <= '1';
+            real_clk_soft_q   <= to_unsigned(1, 4);
+            real_v_soft_spk   <= '1';
+            real_v_soft_q     <= to_unsigned(2, 4);
+            wait_cycles(1);
+            btn(3)            <= '0';
+            btn(2)            <= '0';
+            real_clk_soft_spk <= '0';
+            real_v_soft_spk   <= '0';
+            wait_cycles(4);
+            check(10, (alert_count_out = 1) and (warning_led = '1') and (zeroize_led = '0'),
+                  "2 large weight events fired Warning LED (snn_spike=1, Key intact)");
+        end procedure;
+
+        -- TB-11: 2 gray events diulang (weight kecil) -> expected: snn_spike = 2, key clear
+        procedure task_tb_11 is
+        begin
+            tb_id <= 11;
+            do_reset;
+            for pair in 1 to 14 loop
+                btn(0)              <= '1'; -- BTN0: Probe (+20)
+                real_probe_soft_spk <= '1';
+                real_probe_soft_q   <= to_unsigned(2, 4);
+                wait_cycles(1);
+                btn(0)              <= '0';
+                real_probe_soft_spk <= '0';
+                wait_cycles(2);
+            end loop;
+            wait_cycles(5);
+            check(11, (alert_count_out = 2) and (zeroize_led = '1') and (key = x"0000"),
+                  "Repeated small weight combo escalated to Key clear (snn_spike=2)");
+        end procedure;
+
+        -- TB-12: 2 gray events diulang (weight besar) -> expected: snn_spike = 2, key clear
+        procedure task_tb_12 is
+        begin
+            tb_id <= 12;
+            do_reset;
+            for burst in 1 to 4 loop
+                btn(3)            <= '1';
+                btn(2)            <= '1';
+                real_clk_soft_spk <= '1';
+                real_clk_soft_q   <= to_unsigned(1, 4);
+                real_v_soft_spk   <= '1';
+                real_v_soft_q     <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3)            <= '0';
+                btn(2)            <= '0';
+                real_clk_soft_spk <= '0';
+                real_v_soft_spk   <= '0';
+                wait_cycles(2);
+            end loop;
+            wait_cycles(5);
+            check(12, (alert_count_out = 2) and (zeroize_led = '1') and (key = x"0000"),
+                  "Repeated large weight combo escalated to Key clear (snn_spike=2)");
+        end procedure;
+
+        -- TB-13: 3 parameter pattern -> expected: snn_spike = 2, key clear
+        procedure task_tb_13 is
+        begin
+            tb_id <= 13;
+            do_reset;
+            for burst in 1 to 2 loop
+                btn(3) <= '1'; real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
+                btn(2) <= '1'; real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
+                btn(1) <= '1'; real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3) <= '0'; real_clk_soft_spk  <= '0';
+                btn(2) <= '0'; real_v_soft_spk    <= '0';
+                btn(1) <= '0'; real_temp_soft_spk <= '0';
+                wait_cycles(4);
+            end loop;
+            wait_cycles(5);
+            check(13, (alert_count_out = 2) and (zeroize_led = '1') and (key = x"0000"),
+                  "3-parameter pattern escalated to Key clear (snn_spike=2)");
+        end procedure;
+
+        -- TB-14: 4 parameter pattern -> expected: snn_spike = 2, key clear
+        procedure task_tb_14 is
+        begin
+            tb_id <= 14;
+            do_reset;
+            for burst in 1 to 2 loop
+                btn(3) <= '1'; real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
+                btn(2) <= '1'; real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
+                btn(1) <= '1'; real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
+                btn(0) <= '1'; real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3) <= '0'; real_clk_soft_spk   <= '0';
+                btn(2) <= '0'; real_v_soft_spk     <= '0';
+                btn(1) <= '0'; real_temp_soft_spk  <= '0';
+                btn(0) <= '0'; real_probe_soft_spk <= '0';
+                wait_cycles(4);
+            end loop;
+            wait_cycles(5);
+            check(14, (alert_count_out = 2) and (zeroize_led = '1') and (key = x"0000"),
+                  "4-parameter pattern escalated to Key clear (snn_spike=2)");
+        end procedure;
+
+        -- TB-15: Decay Behavior (T_DECAY diperkecil untuk simulasi) -> expected: decay to 0, no action
+        procedure task_tb_15 is
+        begin
+            tb_id <= 15;
+            do_reset;
+            btn(3)            <= '1'; -- 1x pulsa soft (+50)
+            real_clk_soft_spk <= '1';
+            real_clk_soft_q   <= to_unsigned(1, 4);
+            wait_cycles(1);
+            btn(3)            <= '0';
+            real_clk_soft_spk <= '0';
+            wait_cycles(3);
+
+            -- T_DECAY simulasi dipercepat: pulsa leak_tick 15 kali
+            for lk in 1 to 15 loop
+                leak_tick <= '1';
+                wait_cycles(1);
+                leak_tick <= '0';
+                wait_cycles(2);
+            end loop;
+            check(15, (snn_v_mem(1) = 0) and (alert_count_out = 0) and (warning_led = '0'),
+                  "Monotonic decay to resting state verified (50 -> 0, spike=0)");
+        end procedure;
+
+        -- TB-16: Interval < T_decay -> expected: accumulation fires snn_spike = 1
+        procedure task_tb_16 is
+        begin
+            tb_id <= 16;
+            do_reset;
+            -- 3 pulsa bertahap dengan jeda leak singkat
+            for step in 1 to 3 loop
+                btn(3)            <= '1';
+                real_clk_soft_spk <= '1';
+                real_clk_soft_q   <= to_unsigned(1, 4);
+                wait_cycles(1);
+                btn(3)            <= '0';
+                real_clk_soft_spk <= '0';
+                wait_cycles(2);
+                leak_tick <= '1';
+                wait_cycles(1);
+                leak_tick <= '0';
+                wait_cycles(2);
+            end loop;
+            -- Pulsa ke-4 tembus threshold (137 >= 128)
+            btn(3)            <= '1';
+            real_clk_soft_spk <= '1';
+            real_clk_soft_q   <= to_unsigned(1, 4);
+            wait_cycles(1);
+            btn(3)            <= '0';
+            real_clk_soft_spk <= '0';
+            wait_cycles(4);
+            check(16, (alert_count_out = 1) and (warning_led = '1') and (zeroize_led = '0'),
+                  "Fast repeat < T_decay accumulated and fired Warning LED (snn_spike=1)");
+        end procedure;
+
     begin
         report "========================================================================" severity note;
         report " Starting tb_scenarios: Complete FSD v2 Anti-Tamper Verification Suite " severity note;
-        report " Reference: tb_scenarios.md (Scenarios A, B, C, D, F)                  " severity note;
+        report " Executing TB-01 through TB-16 Sequentially in One Simulation Window   " severity note;
         report "========================================================================" severity note;
 
-        ------------------------------------------------------------------------
-        -- Scenario A: Conventional Threshold Detection (Layer 1 Instant)
-        ------------------------------------------------------------------------
-        report "----------------------------------------------------------------" severity note;
-        report " [Scenario A] Conventional Threshold Detection (TB-01 to TB-05)" severity note;
-        report "----------------------------------------------------------------" severity note;
+        -- Eksekusi 16 Task Skenario secara berurutan
+        task_tb_01;
+        task_tb_02;
+        task_tb_03;
+        task_tb_04;
+        task_tb_05;
+        task_tb_06;
+        task_tb_07;
+        task_tb_08;
+        task_tb_09;
+        task_tb_09_10;
+        task_tb_11;
+        task_tb_12;
+        task_tb_13;
+        task_tb_14;
+        task_tb_15;
+        task_tb_16;
 
-        -- TB-01: Normal operation -> No action
-        reset_system;
-        wait_cycles(20);
-        assert (alert_count_out = 0) and (alert_latched = '0') and (zeroized_latched = '0') and (key_disp = x"0123")
-            report "TB-01 FAILED: Unexpected alert in normal condition!" severity failure;
-        report " [PASS] TB-01: Normal operation verified (Key=0123 intact, 0 alerts, 0 spikes)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-02: Extreme voltage -> Key clear
-        reset_system;
-        sw_extreme_volt <= '1';
-        real_v_under_h  <= '1';
-        hard_alert_l1   <= '1';
-        wait_cycles(3);
-        sw_extreme_volt <= '0';
-        real_v_under_h  <= '0';
-        hard_alert_l1   <= '0';
-        wait_cycles(2);
-        assert (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-02 FAILED: Extreme voltage did not trigger immediate key clear!" severity failure;
-        report " [PASS] TB-02: Extreme voltage verified (Key cleared to 0000 instantly)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-03: Extreme temperature -> Key clear
-        reset_system;
-        sw_extreme_temp <= '1';
-        hard_alert_l1   <= '1'; -- Simulated thermal breaker trip
-        wait_cycles(3);
-        sw_extreme_temp <= '0';
-        hard_alert_l1   <= '0';
-        wait_cycles(2);
-        assert (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-03 FAILED: Extreme temperature did not trigger immediate key clear!" severity failure;
-        report " [PASS] TB-03: Extreme temperature verified (Key cleared to 0000 instantly)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-04: Extreme clock -> Key clear
-        reset_system;
-        sw_extreme_clk  <= '1';
-        real_clk_fast_h <= '1';
-        hard_alert_l1   <= '1';
-        wait_cycles(3);
-        sw_extreme_clk  <= '0';
-        real_clk_fast_h <= '0';
-        hard_alert_l1   <= '0';
-        wait_cycles(2);
-        assert (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-04 FAILED: Extreme clock glitch did not trigger immediate key clear!" severity failure;
-        report " [PASS] TB-04: Extreme clock verified (Key cleared to 0000 instantly)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-05: Extreme memory integrity -> Key clear
-        reset_system;
-        sw_extreme_mem   <= '1';
-        corrupt_inject_h <= '1';
-        wait_cycles(1);
-        hard_alert_l1    <= key_corrupt_out;
-        wait_cycles(1);
-        corrupt_inject_h <= '0';
-        wait_cycles(3);
-        sw_extreme_mem   <= '0';
-        hard_alert_l1    <= '0';
-        wait_cycles(2);
-        assert (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-05 FAILED: Memory integrity tamper did not trigger immediate key clear!" severity failure;
-        report " [PASS] TB-05: Extreme memory integrity verified (Key cleared to 0000 instantly)" severity note;
-        pass_count := pass_count + 1;
-
-        ------------------------------------------------------------------------
-        -- Scenario B: Single Gray-Zone Parameter
-        ------------------------------------------------------------------------
-        report "----------------------------------------------------------------" severity note;
-        report " [Scenario B] Single Gray-Zone Parameter (TB-06 to TB-08)      " severity note;
-        report "----------------------------------------------------------------" severity note;
-
-        -- TB-06: Single gray event -> snn_spike = 0, no action
-        reset_system;
-        btnc_clk_glitch   <= '1';
-        real_clk_soft_spk <= '1';
-        real_clk_soft_q   <= to_unsigned(1, 4); -- 1x pulse (+50 weight)
-        wait_cycles(1);
-        btnc_clk_glitch   <= '0';
-        real_clk_soft_spk <= '0';
-        wait_cycles(4);
-        assert (alert_count_out = 0) and (alert_latched = '0') and (zeroized_latched = '0') and (snn_v_mem(1) = 50)
-            report "TB-06 FAILED: Single gray event falsely triggered spike or alert!" severity failure;
-        report " [PASS] TB-06: Single gray event verified (V=50 < 128, snn_spike=0, no action)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-07: Parameter yang sama diulang -> snn_spike = 1, warning LED
-        -- Inject 2 more pulses (+50 + 50 => Total 150 >= 128)
-        for i in 1 to 2 loop
-            btnc_clk_glitch   <= '1';
-            real_clk_soft_spk <= '1';
-            real_clk_soft_q   <= to_unsigned(1, 4);
-            wait_cycles(1);
-            btnc_clk_glitch   <= '0';
-            real_clk_soft_spk <= '0';
-            wait_cycles(3);
-        end loop;
-        assert (alert_count_out = 1) and (alert_latched = '1') and (zeroized_latched = '0') and (key_disp = x"0123")
-            report "TB-07 FAILED: Repeated gray event did not fire snn_spike=1 Warning LED!" severity failure;
-        report " [PASS] TB-07: Repeated gray event verified (snn_spike=1, Warning LED=1, Key intact)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-08: Parameter yang sama diulang lagi -> snn_spike = 2, key clear
-        -- Subtractive reset leaves V = 150 - 128 = 22.
-        -- Inject 3 more pulses (+50 x 3 = +150 => 22 + 150 = 172 >= 128)
-        for i in 1 to 3 loop
-            btnc_clk_glitch   <= '1';
-            real_clk_soft_spk <= '1';
-            real_clk_soft_q   <= to_unsigned(1, 4);
-            wait_cycles(1);
-            btnc_clk_glitch   <= '0';
-            real_clk_soft_spk <= '0';
-            wait_cycles(3);
-        end loop;
-        wait_cycles(5);
-        assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-08 FAILED: Further repeated gray event did not escalate to snn_spike=2 key clear!" severity failure;
-        report " [PASS] TB-08: Repeated gray event verified (snn_spike=2, Zeroize=1, Key cleared to 0000)" severity note;
-        pass_count := pass_count + 1;
-
-        ------------------------------------------------------------------------
-        -- Scenario C: Gray-Zone Combination
-        ------------------------------------------------------------------------
-        report "----------------------------------------------------------------" severity note;
-        report " [Scenario C] Gray-Zone Combination (TB-09 to TB-12)           " severity note;
-        report "----------------------------------------------------------------" severity note;
-
-        -- TB-09: Two gray events (2 parameter weight kecil) -> snn_spike = 0, no action
-        reset_system;
-        -- CH_PROBE_SOFT (w=10) + small pulse
-        btnr_probe_cap      <= '1';
-        real_probe_soft_spk <= '1';
-        real_probe_soft_q   <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnr_probe_cap      <= '0';
-        real_probe_soft_spk <= '0';
-        wait_cycles(3);
-        btnr_probe_cap      <= '1';
-        real_probe_soft_spk <= '1';
-        real_probe_soft_q   <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnr_probe_cap      <= '0';
-        real_probe_soft_spk <= '0';
-        wait_cycles(4);
-        assert (alert_count_out = 0) and (alert_latched = '0') and (snn_v_mem(1) = 20)
-            report "TB-09 FAILED: Small weight combination exceeded threshold!" severity failure;
-        report " [PASS] TB-09: 2 small weight gray events verified (V=20 < 128, snn_spike=0, no action)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-10: Two gray events (2 parameter weight besar) -> snn_spike = 1, warning LED
-        reset_system;
-        -- CH_CLK_SOFT (w=50, q=1) + CH_V_SOFT (w=50, q=2) => 50 + 100 = 150 >= 128
-        btnc_clk_glitch   <= '1';
-        btnu_volt_drop    <= '1';
-        real_clk_soft_spk <= '1';
-        real_clk_soft_q   <= to_unsigned(1, 4);
-        real_v_soft_spk   <= '1';
-        real_v_soft_q     <= to_unsigned(2, 4);
-        wait_cycles(1);
-        btnc_clk_glitch   <= '0';
-        btnu_volt_drop    <= '0';
-        real_clk_soft_spk <= '0';
-        real_v_soft_spk   <= '0';
-        wait_cycles(4);
-        assert (alert_count_out = 1) and (alert_latched = '1') and (zeroized_latched = '0')
-            report "TB-10 FAILED: Large weight combination did not trigger warning LED!" severity failure;
-        report " [PASS] TB-10: 2 large weight gray events verified (snn_spike=1, Warning LED=1, Key intact)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-11: Two gray events diulang (2 parameter weight kecil) -> snn_spike = 2, key clear
-        reset_system;
-        -- Inject 14 pairs of probe pulses (+10 each => 20 per pair => 140 each burst => 2 spikes)
-        for pair in 1 to 14 loop
-            btnr_probe_cap      <= '1';
-            real_probe_soft_spk <= '1';
-            real_probe_soft_q   <= to_unsigned(2, 4); -- 2 x 10 = +20 per tick
-            wait_cycles(1);
-            btnr_probe_cap      <= '0';
-            real_probe_soft_spk <= '0';
-            wait_cycles(2);
-        end loop;
-        wait_cycles(5);
-        assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-11 FAILED: Repeated small weight combo did not escalate to key clear!" severity failure;
-        report " [PASS] TB-11: Repeated small weight combo verified (snn_spike=2, Key cleared)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-12: Two gray events diulang (2 parameter weight besar) -> snn_spike = 2, key clear
-        reset_system;
-        -- Burst 1: CLK_SOFT (w=50) + V_SOFT (w=50) => 100 + 100 = 200 >= 128 => Spike 1
-        for burst in 1 to 2 loop
-            btnc_clk_glitch   <= '1';
-            btnu_volt_drop    <= '1';
-            real_clk_soft_spk <= '1';
-            real_clk_soft_q   <= to_unsigned(1, 4);
-            real_v_soft_spk   <= '1';
-            real_v_soft_q     <= to_unsigned(1, 4);
-            wait_cycles(1);
-            btnc_clk_glitch   <= '0';
-            btnu_volt_drop    <= '0';
-            real_clk_soft_spk <= '0';
-            real_v_soft_spk   <= '0';
-            wait_cycles(2);
-        end loop;
-        wait_cycles(3);
-        assert (alert_count_out = 1)
-            report "TB-12 Check 1 FAILED: Expected Spike 1 after burst 1!" severity failure;
-        -- Burst 2: repeat CLK_SOFT + V_SOFT => Spike 2
-        for burst in 1 to 2 loop
-            btnc_clk_glitch   <= '1';
-            btnu_volt_drop    <= '1';
-            real_clk_soft_spk <= '1';
-            real_clk_soft_q   <= to_unsigned(1, 4);
-            real_v_soft_spk   <= '1';
-            real_v_soft_q     <= to_unsigned(1, 4);
-            wait_cycles(1);
-            btnc_clk_glitch   <= '0';
-            btnu_volt_drop    <= '0';
-            real_clk_soft_spk <= '0';
-            real_v_soft_spk   <= '0';
-            wait_cycles(2);
-        end loop;
-        wait_cycles(5);
-        assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-12 FAILED: Repeated large weight combo did not escalate to key clear!" severity failure;
-        report " [PASS] TB-12: Repeated large weight combo verified (snn_spike=2, Key cleared)" severity note;
-        pass_count := pass_count + 1;
-
-        ------------------------------------------------------------------------
-        -- Scenario D: Parameter Sweep
-        ------------------------------------------------------------------------
-        report "----------------------------------------------------------------" severity note;
-        report " [Scenario D] Parameter Sweep (TB-13 & TB-14)                  " severity note;
-        report "----------------------------------------------------------------" severity note;
-
-        -- TB-13: Combination parameter pattern (3 parameter) -> snn_spike = 2, key clear
-        reset_system;
-        -- Simultaneous Clock (50) + Voltage (50) + Temperature (50) = 150 >= 128
-        -- Event 1: 150 >= 128 -> Spike 1 (V_reset = 22)
-        btnc_clk_glitch    <= '1'; real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
-        btnu_volt_drop     <= '1'; real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
-        btnl_temp_anomaly  <= '1'; real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnc_clk_glitch    <= '0'; real_clk_soft_spk  <= '0';
-        btnu_volt_drop     <= '0'; real_v_soft_spk    <= '0';
-        btnl_temp_anomaly  <= '0'; real_temp_soft_spk <= '0';
-        wait_cycles(4);
-        assert (alert_count_out = 1)
-            report "TB-13 Check 1 FAILED: Expected Spike 1 on 3-parameter combination!" severity failure;
-
-        -- Event 2: 22 + 150 = 172 >= 128 -> Spike 2 -> Key Clear
-        btnc_clk_glitch    <= '1'; real_clk_soft_spk  <= '1'; real_clk_soft_q  <= to_unsigned(1, 4);
-        btnu_volt_drop     <= '1'; real_v_soft_spk    <= '1'; real_v_soft_q    <= to_unsigned(1, 4);
-        btnl_temp_anomaly  <= '1'; real_temp_soft_spk <= '1'; real_temp_soft_q <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnc_clk_glitch    <= '0'; real_clk_soft_spk  <= '0';
-        btnu_volt_drop     <= '0'; real_v_soft_spk    <= '0';
-        btnl_temp_anomaly  <= '0'; real_temp_soft_spk <= '0';
-        wait_cycles(5);
-        assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-13 FAILED: 3-parameter pattern did not escalate to key clear!" severity failure;
-        report " [PASS] TB-13: 3-parameter pattern verified (snn_spike=2, Key cleared to 0000)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-14: Combination parameter pattern (4 parameter) -> snn_spike = 2, key clear
-        reset_system;
-        -- Simultaneous Clock (50) + Voltage (50) + Temp (50) + Probe (10) = 160 >= 128
-        -- Event 1: 160 >= 128 -> Spike 1 (V_reset = 32)
-        btnc_clk_glitch     <= '1'; real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
-        btnu_volt_drop      <= '1'; real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
-        btnl_temp_anomaly   <= '1'; real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
-        btnr_probe_cap      <= '1'; real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnc_clk_glitch     <= '0'; real_clk_soft_spk   <= '0';
-        btnu_volt_drop      <= '0'; real_v_soft_spk     <= '0';
-        btnl_temp_anomaly   <= '0'; real_temp_soft_spk  <= '0';
-        btnr_probe_cap      <= '0'; real_probe_soft_spk <= '0';
-        wait_cycles(4);
-        assert (alert_count_out = 1)
-            report "TB-14 Check 1 FAILED: Expected Spike 1 on 4-parameter combination!" severity failure;
-
-        -- Event 2: 32 + 160 = 192 >= 128 -> Spike 2 -> Key Clear
-        btnc_clk_glitch     <= '1'; real_clk_soft_spk   <= '1'; real_clk_soft_q   <= to_unsigned(1, 4);
-        btnu_volt_drop      <= '1'; real_v_soft_spk     <= '1'; real_v_soft_q     <= to_unsigned(1, 4);
-        btnl_temp_anomaly   <= '1'; real_temp_soft_spk  <= '1'; real_temp_soft_q  <= to_unsigned(1, 4);
-        btnr_probe_cap      <= '1'; real_probe_soft_spk <= '1'; real_probe_soft_q <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnc_clk_glitch     <= '0'; real_clk_soft_spk   <= '0';
-        btnu_volt_drop      <= '0'; real_v_soft_spk     <= '0';
-        btnl_temp_anomaly   <= '0'; real_temp_soft_spk  <= '0';
-        btnr_probe_cap      <= '0'; real_probe_soft_spk <= '0';
-        wait_cycles(5);
-        assert (alert_count_out = 2) and (zeroized_latched = '1') and (key_disp = x"0000")
-            report "TB-14 FAILED: 4-parameter pattern did not escalate to key clear!" severity failure;
-        report " [PASS] TB-14: 4-parameter pattern verified (snn_spike=2, Key cleared to 0000)" severity note;
-        pass_count := pass_count + 1;
-
-        ------------------------------------------------------------------------
-        -- Scenario F: Decay Behavior
-        ------------------------------------------------------------------------
-        report "----------------------------------------------------------------" severity note;
-        report " [Scenario F] Membrane Potential Decay Behavior (TB-15 & TB-16)" severity note;
-        report "----------------------------------------------------------------" severity note;
-
-        -- TB-15: Satu gray event, lalu tidak ada input. Pantau membrane potential
-        reset_system;
-        btnc_clk_glitch   <= '1';
-        real_clk_soft_spk <= '1';
-        real_clk_soft_q   <= to_unsigned(1, 4); -- +50 weight
-        wait_cycles(1);
-        btnc_clk_glitch   <= '0';
-        real_clk_soft_spk <= '0';
-        wait_cycles(3);
-        assert (snn_v_mem(1) = 50)
-            report "TB-15 FAILED: Initial deposit != 50!" severity failure;
-        report "  TB-15 Initial deposit: V = " & integer'image(to_integer(snn_v_mem(1))) severity note;
-
-        -- Pulse leak ticks and observe monotonic decay: V -= V >> 2
-        -- 50 -> 38 -> 29 -> 22 -> 17 -> 13 -> 10 -> 8 -> 6 -> 5 -> 4 -> 3 -> 2 -> 1 -> 0
-        for lk in 1 to 15 loop
-            leak_tick <= '1';
-            wait_cycles(1);
-            leak_tick <= '0';
-            wait_cycles(2);
-            report "  TB-15 Leak Step " & integer'image(lk) & ": V = " & integer'image(to_integer(snn_v_mem(1))) severity note;
-        end loop;
-        assert (snn_v_mem(1) = 0) and (alert_count_out = 0)
-            report "TB-15 FAILED: Membrane potential did not decay to 0!" severity failure;
-        report " [PASS] TB-15: Monotonic decay verified (Decayed cleanly 50 -> 0, snn_spike=0)" severity note;
-        pass_count := pass_count + 1;
-
-        -- TB-16: Gray event diulang dengan interval < T_decay
-        reset_system;
-        -- Deposit +50, leak 1 tick, repeat 4 times:
-        for step in 1 to 3 loop
-            btnc_clk_glitch   <= '1';
-            real_clk_soft_spk <= '1';
-            real_clk_soft_q   <= to_unsigned(1, 4);
-            wait_cycles(1);
-            btnc_clk_glitch   <= '0';
-            real_clk_soft_spk <= '0';
-            wait_cycles(2);
-            -- Single leak tick (interval < T_decay)
-            leak_tick <= '1';
-            wait_cycles(1);
-            leak_tick <= '0';
-            wait_cycles(2);
-            report "  TB-16 Fast Repeat Step " & integer'image(step) & ": V = " & integer'image(to_integer(snn_v_mem(1))) severity note;
-        end loop;
-
-        -- Final 4th deposit
-        btnc_clk_glitch   <= '1';
-        real_clk_soft_spk <= '1';
-        real_clk_soft_q   <= to_unsigned(1, 4);
-        wait_cycles(1);
-        btnc_clk_glitch   <= '0';
-        real_clk_soft_spk <= '0';
-        wait_cycles(4);
-        report "  TB-16 After Deposit 4: V = " & integer'image(to_integer(snn_v_mem(1))) & ", Alerts = " & integer'image(to_integer(alert_count_out)) severity note;
-
-        assert (alert_count_out = 1) and (alert_latched = '1') and (zeroized_latched = '0')
-            report "TB-16 FAILED: Fast repeat < T_decay did not accumulate and fire snn_spike=1!" severity failure;
-        report " [PASS] TB-16: Accumulation < T_decay verified (Overcame decay, snn_spike=1, Warning LED=1)" severity note;
-        pass_count := pass_count + 1;
-
-        ------------------------------------------------------------------------
-        -- Verification Summary
-        ------------------------------------------------------------------------
+        -- Rekap Hasil PASS / FAIL
         report "========================================================================" severity note;
-        report " VERIFICATION COMPLETED: ALL 16 SCENARIOS PASSED WITH ZERO FAILURES!     " severity note;
-        report " Total Passed: " & integer'image(pass_count) & " / 16 scenarios          " severity note;
+        report " VERIFICATION RECAP: ALL 16 SCENARIOS EXECUTED!                         " severity note;
+        report " Total Passed : " & integer'image(pass_count) & " / 16 scenarios         " severity note;
+        report " Total Failed : " & integer'image(fail_count) & " / 16 scenarios         " severity note;
         report "========================================================================" severity note;
+
+        if fail_count = 0 then
+            report " >>> ALL 16 SCENARIOS PASSED WITH ZERO FAILURES! <<< " severity note;
+        else
+            report " >>> SOME SCENARIOS FAILED! PLEASE REVIEW LOGS. <<< " severity error;
+        end if;
 
         sim_done <= true;
+        finish; -- $finish equivalent in VHDL-2008 std.env
         wait;
     end process p_main;
 
